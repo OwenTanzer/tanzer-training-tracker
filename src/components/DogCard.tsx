@@ -75,6 +75,7 @@ export function DogCard({ dog }: { dog: Dog }) {
           <ProgressBar
             progress={dog.graduationProgress}
             status={dog.graduationStatus}
+            released={dog.released}
             compact
           />
         </div>

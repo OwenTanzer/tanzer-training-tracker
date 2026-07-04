@@ -24,6 +24,8 @@ export interface Dog {
   currentPhase: Phase;
   graduationProgress: number;
   graduationStatus: GraduationStatus;
+  released: boolean;
+  releasedDate: string | null;
   createdDate: string;
   updatedDate: string;
 }
