@@ -11,6 +11,7 @@ import type {
   TrainingReport,
 } from '../types';
 import { loadDatabase, saveDatabase, type Database } from './db';
+import { logEvent } from '../lib/diagnostics';
 
 let db: Database = loadDatabase();
 const listeners = new Set<() => void>();
@@ -27,6 +28,31 @@ function subscribe(listener: () => void) {
 
 function useDatabase(): Database {
   return useSyncExternalStore(subscribe, () => db);
+}
+
+export interface DatabaseCounts {
+  folders: number;
+  dogs: number;
+  reports: number;
+  locations: number;
+  checklistItems: number;
+  completions: number;
+  milestones: number;
+  storageBytes: number;
+}
+
+export function useDatabaseCounts(): DatabaseCounts {
+  const state = useDatabase();
+  return {
+    folders: state.folders.length,
+    dogs: state.dogs.length,
+    reports: state.reports.length,
+    locations: state.locations.length,
+    checklistItems: state.checklistItems.length,
+    completions: state.completions.length,
+    milestones: state.milestones.length,
+    storageBytes: JSON.stringify(state).length,
+  };
 }
 
 const now = () => new Date().toISOString();
@@ -81,6 +107,7 @@ export function createFolder(name: string, parentFolderId: string | null): Folde
   };
   db.folders.push(folder);
   notify();
+  logEvent('Folder created', folder.name);
   return folder;
 }
 
@@ -95,6 +122,7 @@ export function renameFolder(id: string, name: string): void {
 export function deleteFolder(id: string): void {
   db.folders = db.folders.filter((f) => f.id !== id);
   notify();
+  logEvent('Folder deleted', id);
 }
 
 // ---- Dogs ----
@@ -125,6 +153,7 @@ export function createDog(
   };
   db.dogs.push(dog);
   notify();
+  logEvent('Dog created', dog.name);
   return dog;
 }
 
@@ -141,6 +170,7 @@ export function deleteDog(id: string): void {
   db.completions = db.completions.filter((c) => c.dogId !== id);
   db.milestones = db.milestones.filter((m) => m.dogId !== id);
   notify();
+  logEvent('Dog deleted', id);
 }
 
 // ---- Training Reports ----
@@ -181,6 +211,10 @@ export function createReport(input: NewReportInput): TrainingReport {
   const dog = db.dogs.find((d) => d.id === input.dogId);
   if (dog) dog.currentPhase = input.phase;
   notify();
+  logEvent(
+    'Training report created',
+    `dog ${input.dogId}, ${input.phase}${input.redFlag ? ', red-flagged' : ''}`,
+  );
   return report;
 }
 
@@ -190,6 +224,7 @@ export function toggleReportRedFlag(id: string): void {
   report.redFlag = !report.redFlag;
   report.updatedDate = now();
   notify();
+  logEvent('Report red flag toggled', `report ${id} -> ${report.redFlag}`);
 }
 
 // ---- Locations ----
@@ -244,6 +279,10 @@ export function toggleChecklistCompletion(
   completion.dateCompleted = completion.completed ? now() : null;
   refreshDogProgress(dogId);
   notify();
+  logEvent(
+    'Checklist item toggled',
+    `dog ${dogId}, item ${checklistItemId} -> ${completion.completed}`,
+  );
 }
 
 // ---- Milestones ----
@@ -271,6 +310,7 @@ export function createMilestone(input: NewMilestoneInput): Milestone {
   };
   db.milestones.push(milestone);
   notify();
+  logEvent('Milestone created', milestone.title);
   return milestone;
 }
 

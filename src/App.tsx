@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, Route, Routes } from 'react-router-dom';
 import { LoadingScreen } from './components/LoadingScreen';
+import { Diagnostics } from './pages/Diagnostics';
 import { DogProfile } from './pages/DogProfile';
 import { FolderView } from './pages/FolderView';
 import { NewReport } from './pages/NewReport';
@@ -19,9 +20,14 @@ function App() {
         <Link to="/" className="font-semibold">
           🐕 Abby's Dog Notes
         </Link>
-        <Link to="/red-flags" className="text-sm text-red-500 hover:underline">
-          🚩 Red Flags
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link to="/red-flags" className="text-sm text-red-500 hover:underline">
+            🚩 Red Flags
+          </Link>
+          <Link to="/diagnostics" className="text-sm text-gray-500 hover:underline">
+            🩺 Diagnostics
+          </Link>
+        </div>
       </header>
       <Routes>
         <Route path="/" element={<FolderView />} />
@@ -29,6 +35,7 @@ function App() {
         <Route path="/dog/:dogId" element={<DogProfile />} />
         <Route path="/dog/:dogId/report/new" element={<NewReport />} />
         <Route path="/red-flags" element={<RedFlags />} />
+        <Route path="/diagnostics" element={<Diagnostics />} />
       </Routes>
     </div>
   );
