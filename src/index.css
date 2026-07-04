@@ -9,6 +9,17 @@ body {
   margin: 0;
 }
 
+/* This is an app UI, not user-generated web content, so Safari's long-press
+   link callout (Open/Copy/Share preview) and native text-selection would
+   only ever fight with our own touch gestures (swipe-to-reveal, drag to
+   reorder) — disable both everywhere. */
+a,
+button {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 @keyframes walk-to-curb {
   0% {
     left: 0;

@@ -4,17 +4,22 @@ import { Breadcrumbs } from '../components/Breadcrumbs';
 import { DogCard } from '../components/DogCard';
 import { FolderCard } from '../components/FolderCard';
 import { MoveDialog } from '../components/MoveDialog';
+import { MoveIcon, PencilIcon, TrashIcon } from '../components/icons';
+import { ReorderableList } from '../components/ReorderableList';
 import {
   createDog,
   createFolder,
   deleteFolder,
   moveFolder,
   renameFolder,
+  reorderDogs,
+  reorderFolders,
   useChildFolders,
   useDogsInFolder,
   useFolder,
   useFolders,
 } from '../data/store';
+import type { Dog, Folder } from '../types';
 
 export function FolderView() {
   const { folderId = null } = useParams<{ folderId?: string }>();
@@ -97,21 +102,21 @@ export function FolderView() {
                 }}
                 className="rounded p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800"
               >
-                ✏️
+                <PencilIcon />
               </button>
               <button
                 title="Move this folder"
                 onClick={() => setMovingSelf(true)}
                 className="rounded p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800"
               >
-                📂
+                <MoveIcon />
               </button>
               <button
                 title="Delete this folder"
                 onClick={handleDeleteSelf}
                 className="rounded p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
               >
-                🗑️
+                <TrashIcon />
               </button>
             </div>
           )}
@@ -133,11 +138,20 @@ export function FolderView() {
         {childFolders.length === 0 && (
           <p className="text-sm text-gray-400">No subfolders yet.</p>
         )}
-        <div className="grid gap-2 sm:grid-cols-2">
-          {childFolders.map((f) => (
-            <FolderCard key={f.id} folder={f} />
-          ))}
-        </div>
+        <ReorderableList
+          items={childFolders}
+          getId={(f: Folder) => f.id}
+          onReorder={(orderedIds) => reorderFolders(folderId, orderedIds)}
+          className="grid gap-2 sm:grid-cols-2"
+          renderItem={(f, gesture, isDragging, dragOffset) => (
+            <FolderCard
+              folder={f}
+              gesture={gesture}
+              isDragging={isDragging}
+              dragOffset={dragOffset}
+            />
+          )}
+        />
         <form onSubmit={handleAddFolder} className="flex gap-2 pt-2">
           <input
             value={newFolderName}
@@ -162,11 +176,20 @@ export function FolderView() {
           {dogs.length === 0 && (
             <p className="text-sm text-gray-400">No dogs in this folder yet.</p>
           )}
-          <div className="grid gap-2 sm:grid-cols-2">
-            {dogs.map((dog) => (
-              <DogCard key={dog.id} dog={dog} />
-            ))}
-          </div>
+          <ReorderableList
+            items={dogs}
+            getId={(dog: Dog) => dog.id}
+            onReorder={(orderedIds) => folderId && reorderDogs(folderId, orderedIds)}
+            className="grid gap-2 sm:grid-cols-2"
+            renderItem={(dog, gesture, isDragging, dragOffset) => (
+              <DogCard
+                dog={dog}
+                gesture={gesture}
+                isDragging={isDragging}
+                dragOffset={dragOffset}
+              />
+            )}
+          />
           <form onSubmit={handleAddDog} className="flex gap-2 pt-2">
             <input
               value={newDogName}

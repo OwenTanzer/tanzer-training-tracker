@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MoveDialog } from '../components/MoveDialog';
+import { PencilIcon } from '../components/icons';
 import { PhotoCropDialog } from '../components/PhotoCropDialog';
 import { ProgressBar } from '../components/ProgressBar';
 import {
@@ -157,7 +158,7 @@ export function DogProfile() {
                 }}
                 className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-800"
               >
-                ✏️
+                <PencilIcon />
               </button>
             </div>
           )}

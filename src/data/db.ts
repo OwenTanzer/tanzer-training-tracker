@@ -94,14 +94,38 @@ function migrateLegacyMilestones(legacy: LegacyMilestone[]): {
   return { milestoneTemplates, dogMilestoneCompletions };
 }
 
+// Folders/dogs predating manual drag-reordering (#16) won't have a sortOrder,
+// so give each one a stable position based on its existing array order,
+// grouped by sibling group (parent folder, or containing folder for dogs).
+function backfillSortOrder<T extends { sortOrder?: number }>(
+  items: T[],
+  groupKey: (item: T) => string,
+): (T & { sortOrder: number })[] {
+  const counters = new Map<string, number>();
+  return items.map((item) => {
+    if (typeof item.sortOrder === 'number') return item as T & { sortOrder: number };
+    const key = groupKey(item);
+    const next = counters.get(key) ?? 0;
+    counters.set(key, next + 1);
+    return { ...item, sortOrder: next };
+  });
+}
+
 // Dogs predating the "released" status (#13) won't have these fields in their
 // stored JSON at all, so they'd otherwise come back as undefined.
 function backfillDogs(dogs: Dog[]): Dog[] {
-  return dogs.map((dog) => ({
-    ...dog,
-    released: dog.released ?? false,
-    releasedDate: dog.releasedDate ?? null,
-  }));
+  return backfillSortOrder(
+    dogs.map((dog) => ({
+      ...dog,
+      released: dog.released ?? false,
+      releasedDate: dog.releasedDate ?? null,
+    })),
+    (dog) => dog.folderId,
+  );
+}
+
+function backfillFolders(folders: Folder[]): Folder[] {
+  return backfillSortOrder(folders, (folder) => folder.parentFolderId ?? 'root');
 }
 
 // Reports predating "skills worked on" (#18) won't have skillIds stored.
@@ -126,6 +150,7 @@ function normalizeDatabase(parsed: Record<string, unknown>): Database {
     Array.isArray(parsed.dogMilestoneCompletions)
   ) {
     const database = parsed as unknown as Database;
+    database.folders = backfillFolders(database.folders ?? []);
     database.dogs = backfillDogs(database.dogs ?? []);
     database.reports = backfillReports(database.reports ?? []);
     database.completions = backfillCompletions(database.completions ?? []);
@@ -138,7 +163,7 @@ function normalizeDatabase(parsed: Record<string, unknown>): Database {
   const migrated = migrateLegacyMilestones(legacy);
 
   const database: Database = {
-    folders: (parsed.folders as Folder[]) ?? [],
+    folders: backfillFolders((parsed.folders as Folder[]) ?? []),
     dogs: backfillDogs((parsed.dogs as Dog[]) ?? []),
     reports: backfillReports((parsed.reports as TrainingReport[]) ?? []),
     locations: (parsed.locations as Location[]) ?? [],

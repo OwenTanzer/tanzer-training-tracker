@@ -12,6 +12,7 @@ export interface Folder {
   id: string;
   name: string;
   parentFolderId: string | null;
+  sortOrder: number;
   createdDate: string;
   updatedDate: string;
 }
@@ -21,6 +22,7 @@ export interface Dog {
   name: string;
   profilePhoto: string | null;
   folderId: string;
+  sortOrder: number;
   currentPhase: Phase;
   graduationProgress: number;
   graduationStatus: GraduationStatus;
