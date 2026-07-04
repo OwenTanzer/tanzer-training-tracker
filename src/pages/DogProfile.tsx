@@ -29,6 +29,7 @@ export function DogProfile() {
   const dog = useDog(dogId);
   const folder = useFolder(dog?.folderId ?? null);
   const checklist = useChecklistItems(dog?.currentPhase);
+  const allChecklistItems = useChecklistItems();
   const completions = useDogCompletions(dogId ?? '');
   const milestones = useMilestoneTemplates(dog?.currentPhase);
   const milestoneCompletions = useDogMilestoneCompletions(dogId ?? '');
@@ -272,6 +273,9 @@ export function DogProfile() {
                   >
                     {item.title}
                   </span>
+                  {!completion?.completed && completion?.inProgress && (
+                    <span className="text-xs text-sky-500">● In progress</span>
+                  )}
                 </label>
               </li>
             );
@@ -391,6 +395,15 @@ export function DogProfile() {
                   />
                 )}
                 <p className="text-sm text-gray-700 dark:text-gray-300">{r.notes}</p>
+                {r.skillIds.length > 0 && (
+                  <p className="text-xs text-gray-500">
+                    Skills worked on:{' '}
+                    {r.skillIds
+                      .map((id) => allChecklistItems.find((i) => i.id === id)?.title)
+                      .filter(Boolean)
+                      .join(', ')}
+                  </p>
+                )}
               </li>
             );
           })}

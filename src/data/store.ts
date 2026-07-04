@@ -294,6 +294,29 @@ export interface NewReportInput {
   locationId: string | null;
   notes: string;
   picture: string | null;
+  skillIds: string[];
+}
+
+function markSkillsInProgress(dogId: string, skillIds: string[]) {
+  skillIds.forEach((checklistItemId) => {
+    let completion = db.completions.find(
+      (c) => c.dogId === dogId && c.checklistItemId === checklistItemId,
+    );
+    if (!completion) {
+      completion = {
+        id: uid(),
+        dogId,
+        checklistItemId,
+        completed: false,
+        inProgress: true,
+        dateCompleted: null,
+        notes: null,
+      };
+      db.completions.push(completion);
+    } else if (!completion.completed) {
+      completion.inProgress = true;
+    }
+  });
 }
 
 export function createReport(
@@ -312,10 +335,11 @@ export function createReport(
   }
   const dog = db.dogs.find((d) => d.id === input.dogId);
   if (dog) dog.currentPhase = input.phase;
+  markSkillsInProgress(input.dogId, input.skillIds);
   const persisted = notify();
   logEvent(
     'Training report created',
-    `dog ${input.dogId}, ${input.phase}${input.redFlag ? ', red-flagged' : ''}`,
+    `dog ${input.dogId}, ${input.phase}${input.redFlag ? ', red-flagged' : ''}, ${input.skillIds.length} skill(s) worked on`,
   );
   return { report, persisted };
 }
@@ -421,6 +445,7 @@ export function toggleChecklistCompletion(
       dogId,
       checklistItemId,
       completed: false,
+      inProgress: false,
       dateCompleted: null,
       notes: null,
     };
@@ -428,6 +453,7 @@ export function toggleChecklistCompletion(
   }
   completion.completed = !completion.completed;
   completion.dateCompleted = completion.completed ? now() : null;
+  if (completion.completed) completion.inProgress = false;
   refreshDogProgress(dogId);
   notify();
   logEvent(

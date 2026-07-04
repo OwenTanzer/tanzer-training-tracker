@@ -38,6 +38,7 @@ export interface TrainingReport {
   locationId: string | null;
   notes: string;
   picture: string | null;
+  skillIds: string[];
   createdDate: string;
   updatedDate: string;
 }
@@ -65,6 +66,7 @@ export interface DogChecklistCompletion {
   dogId: string;
   checklistItemId: string;
   completed: boolean;
+  inProgress: boolean;
   dateCompleted: string | null;
   notes: string | null;
 }

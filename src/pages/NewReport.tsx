@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { compressImageToDataUrl } from '../lib/compressImage';
-import { createLocation, createReport, useDog, useLocations } from '../data/store';
+import {
+  createLocation,
+  createReport,
+  useChecklistItems,
+  useDog,
+  useLocations,
+} from '../data/store';
 import { PHASES, type Phase } from '../types';
 
 export function NewReport() {
@@ -18,9 +24,22 @@ export function NewReport() {
   const [picture, setPicture] = useState<string | null>(null);
   const [pictureError, setPictureError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [skillIds, setSkillIds] = useState<string[]>([]);
+  const skillsForPhase = useChecklistItems(phase);
 
   if (!dog || !dogId) {
     return <p className="p-4 text-gray-500">Dog not found.</p>;
+  }
+
+  function handlePhaseChange(next: Phase) {
+    setPhase(next);
+    setSkillIds([]);
+  }
+
+  function toggleSkill(id: string) {
+    setSkillIds((prev) =>
+      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id],
+    );
   }
 
   async function handlePictureChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -48,6 +67,7 @@ export function NewReport() {
       locationId: finalLocationId,
       notes,
       picture,
+      skillIds,
     });
     if (!persisted) {
       setSubmitError(
@@ -74,7 +94,7 @@ export function NewReport() {
           </label>
           <select
             value={phase}
-            onChange={(e) => setPhase(e.target.value as Phase)}
+            onChange={(e) => handlePhaseChange(e.target.value as Phase)}
             className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2"
           >
             {PHASES.map((p) => (
@@ -83,6 +103,27 @@ export function NewReport() {
               </option>
             ))}
           </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Skills worked on
+          </label>
+          <div className="space-y-1">
+            {skillsForPhase.map((item) => (
+              <label key={item.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={skillIds.includes(item.id)}
+                  onChange={() => toggleSkill(item.id)}
+                />
+                {item.title}
+              </label>
+            ))}
+            {skillsForPhase.length === 0 && (
+              <p className="text-sm text-gray-400">No skills set up for {phase} yet.</p>
+            )}
+          </div>
         </div>
 
         <label className="flex items-center gap-2 text-sm">

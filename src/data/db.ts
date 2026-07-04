@@ -104,6 +104,22 @@ function backfillDogs(dogs: Dog[]): Dog[] {
   }));
 }
 
+// Reports predating "skills worked on" (#18) won't have skillIds stored.
+function backfillReports(reports: TrainingReport[]): TrainingReport[] {
+  return reports.map((report) => ({
+    ...report,
+    skillIds: report.skillIds ?? [],
+  }));
+}
+
+// Completions predating the "in progress" status (#18) won't have inProgress stored.
+function backfillCompletions(completions: DogChecklistCompletion[]): DogChecklistCompletion[] {
+  return completions.map((completion) => ({
+    ...completion,
+    inProgress: completion.inProgress ?? false,
+  }));
+}
+
 function normalizeDatabase(parsed: Record<string, unknown>): Database {
   if (
     Array.isArray(parsed.milestoneTemplates) &&
@@ -111,6 +127,8 @@ function normalizeDatabase(parsed: Record<string, unknown>): Database {
   ) {
     const database = parsed as unknown as Database;
     database.dogs = backfillDogs(database.dogs ?? []);
+    database.reports = backfillReports(database.reports ?? []);
+    database.completions = backfillCompletions(database.completions ?? []);
     return database;
   }
 
@@ -122,10 +140,10 @@ function normalizeDatabase(parsed: Record<string, unknown>): Database {
   const database: Database = {
     folders: (parsed.folders as Folder[]) ?? [],
     dogs: backfillDogs((parsed.dogs as Dog[]) ?? []),
-    reports: (parsed.reports as TrainingReport[]) ?? [],
+    reports: backfillReports((parsed.reports as TrainingReport[]) ?? []),
     locations: (parsed.locations as Location[]) ?? [],
     checklistItems: (parsed.checklistItems as PhaseChecklistItem[]) ?? buildDefaultChecklist(),
-    completions: (parsed.completions as DogChecklistCompletion[]) ?? [],
+    completions: backfillCompletions((parsed.completions as DogChecklistCompletion[]) ?? []),
     milestoneTemplates:
       migrated.milestoneTemplates.length > 0
         ? migrated.milestoneTemplates
