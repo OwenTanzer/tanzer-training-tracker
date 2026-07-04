@@ -6,6 +6,8 @@ import { compressImageToDataUrl } from '../lib/compressImage';
 import {
   deleteDog,
   moveDog,
+  reactivateDog,
+  releaseDog,
   toggleChecklistCompletion,
   toggleDogMilestoneCompletion,
   toggleReportRedFlag,
@@ -91,6 +93,20 @@ export function DogProfile() {
     setMoving(false);
   }
 
+  function handleRelease() {
+    if (!dog) return;
+    if (!confirm(`Mark ${dog.name} as released from training? Their record is kept, just marked inactive.`)) {
+      return;
+    }
+    releaseDog(dog.id);
+  }
+
+  function handleReactivate() {
+    if (!dog) return;
+    if (!confirm(`Reactivate ${dog.name}? This removes the "released" marker.`)) return;
+    reactivateDog(dog.id);
+  }
+
   return (
     <div className="max-w-3xl mx-auto p-4 space-y-6">
       <Link
@@ -157,7 +173,16 @@ export function DogProfile() {
               ))}
             </select>
           </div>
-          <ProgressBar progress={dog.graduationProgress} status={dog.graduationStatus} />
+          <ProgressBar
+            progress={dog.graduationProgress}
+            status={dog.graduationStatus}
+            released={dog.released}
+          />
+          {dog.released && dog.releasedDate && (
+            <p className="text-xs text-red-500">
+              Released on {new Date(dog.releasedDate).toLocaleDateString()}
+            </p>
+          )}
           {photoError && <p className="text-xs text-red-500">{photoError}</p>}
         </div>
       </div>
@@ -175,6 +200,21 @@ export function DogProfile() {
         >
           📂 Move to Folder
         </button>
+        {dog.released ? (
+          <button
+            onClick={handleReactivate}
+            className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800"
+          >
+            ↩️ Reactivate
+          </button>
+        ) : (
+          <button
+            onClick={handleRelease}
+            className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
+          >
+            Release from Training
+          </button>
+        )}
         <button
           onClick={handleDeleteDog}
           className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-950"

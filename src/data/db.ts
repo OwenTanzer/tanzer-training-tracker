@@ -94,12 +94,24 @@ function migrateLegacyMilestones(legacy: LegacyMilestone[]): {
   return { milestoneTemplates, dogMilestoneCompletions };
 }
 
+// Dogs predating the "released" status (#13) won't have these fields in their
+// stored JSON at all, so they'd otherwise come back as undefined.
+function backfillDogs(dogs: Dog[]): Dog[] {
+  return dogs.map((dog) => ({
+    ...dog,
+    released: dog.released ?? false,
+    releasedDate: dog.releasedDate ?? null,
+  }));
+}
+
 function normalizeDatabase(parsed: Record<string, unknown>): Database {
   if (
     Array.isArray(parsed.milestoneTemplates) &&
     Array.isArray(parsed.dogMilestoneCompletions)
   ) {
-    return parsed as unknown as Database;
+    const database = parsed as unknown as Database;
+    database.dogs = backfillDogs(database.dogs ?? []);
+    return database;
   }
 
   const legacy = Array.isArray(parsed.milestones)
@@ -109,7 +121,7 @@ function normalizeDatabase(parsed: Record<string, unknown>): Database {
 
   const database: Database = {
     folders: (parsed.folders as Folder[]) ?? [],
-    dogs: (parsed.dogs as Dog[]) ?? [],
+    dogs: backfillDogs((parsed.dogs as Dog[]) ?? []),
     reports: (parsed.reports as TrainingReport[]) ?? [],
     locations: (parsed.locations as Location[]) ?? [],
     checklistItems: (parsed.checklistItems as PhaseChecklistItem[]) ?? buildDefaultChecklist(),

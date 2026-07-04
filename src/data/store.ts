@@ -218,6 +218,8 @@ export function createDog(
     currentPhase: 'Phase 1',
     graduationProgress: 0,
     graduationStatus: 'Not Started',
+    released: false,
+    releasedDate: null,
     createdDate: now(),
     updatedDate: now(),
   };
@@ -232,6 +234,28 @@ export function updateDog(id: string, updates: Partial<Dog>): boolean {
   if (!dog) return false;
   Object.assign(dog, updates, { updatedDate: now() });
   return notify();
+}
+
+export function releaseDog(id: string): boolean {
+  const dog = db.dogs.find((d) => d.id === id);
+  if (!dog) return false;
+  dog.released = true;
+  dog.releasedDate = now();
+  dog.updatedDate = now();
+  const persisted = notify();
+  logEvent('Dog released', id);
+  return persisted;
+}
+
+export function reactivateDog(id: string): boolean {
+  const dog = db.dogs.find((d) => d.id === id);
+  if (!dog) return false;
+  dog.released = false;
+  dog.releasedDate = null;
+  dog.updatedDate = now();
+  const persisted = notify();
+  logEvent('Dog reactivated', id);
+  return persisted;
 }
 
 export function moveDog(id: string, newFolderId: string): boolean {
