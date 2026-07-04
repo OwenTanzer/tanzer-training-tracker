@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { MoveDialog } from '../components/MoveDialog';
 import { ProgressBar } from '../components/ProgressBar';
 import { compressImageToDataUrl } from '../lib/compressImage';
 import {
   createMilestone,
   deleteDog,
+  moveDog,
   toggleChecklistCompletion,
   toggleMilestoneCompletion,
   toggleReportRedFlag,
@@ -37,6 +39,9 @@ export function DogProfile() {
   const [search, setSearch] = useState('');
   const [milestoneTitle, setMilestoneTitle] = useState('');
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [renamingSelf, setRenamingSelf] = useState(false);
+  const [selfName, setSelfName] = useState(dog?.name ?? '');
+  const [moving, setMoving] = useState(false);
 
   const reports = useMemo(() => {
     return allReports.filter((r) => {
@@ -89,6 +94,18 @@ export function DogProfile() {
     navigate(folder ? `/folder/${folder.id}` : '/');
   }
 
+  function handleRenameSelfSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = selfName.trim();
+    if (dog && trimmed && trimmed !== dog.name) updateDog(dog.id, { name: trimmed });
+    setRenamingSelf(false);
+  }
+
+  function handleMoveSelfSelect(destinationId: string | null) {
+    if (dog && destinationId) moveDog(dog.id, destinationId);
+    setMoving(false);
+  }
+
   return (
     <div className="max-w-3xl mx-auto p-4 space-y-6">
       <Link
@@ -112,9 +129,33 @@ export function DogProfile() {
           <input type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
         </label>
         <div className="flex-1 space-y-2">
-          <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
-            {dog.name}
-          </h1>
+          {renamingSelf ? (
+            <form onSubmit={handleRenameSelfSubmit}>
+              <input
+                autoFocus
+                value={selfName}
+                onChange={(e) => setSelfName(e.target.value)}
+                onBlur={handleRenameSelfSubmit}
+                className="text-2xl font-semibold bg-transparent border-b border-sky-400 focus:outline-none text-gray-900 dark:text-gray-100"
+              />
+            </form>
+          ) : (
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
+                {dog.name}
+              </h1>
+              <button
+                title="Rename"
+                onClick={() => {
+                  setSelfName(dog.name);
+                  setRenamingSelf(true);
+                }}
+                className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                ✏️
+              </button>
+            </div>
+          )}
           <div className="flex items-center gap-2 text-sm">
             <label className="text-gray-500">Phase:</label>
             <select
@@ -144,12 +185,26 @@ export function DogProfile() {
           + New Training Report
         </Link>
         <button
+          onClick={() => setMoving(true)}
+          className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800"
+        >
+          📂 Move to Folder
+        </button>
+        <button
           onClick={handleDeleteDog}
           className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
         >
           Delete Profile
         </button>
       </div>
+      {moving && (
+        <MoveDialog
+          title={`Move ${dog.name} to…`}
+          allowRoot={false}
+          onSelect={handleMoveSelfSelect}
+          onClose={() => setMoving(false)}
+        />
+      )}
 
       <section className="space-y-2">
         <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">

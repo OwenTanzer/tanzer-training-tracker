@@ -123,18 +123,62 @@ export function createFolder(name: string, parentFolderId: string | null): Folde
   return folder;
 }
 
-export function renameFolder(id: string, name: string): void {
+export function renameFolder(id: string, name: string): boolean {
   const folder = db.folders.find((f) => f.id === id);
-  if (!folder) return;
+  if (!folder) return false;
   folder.name = name;
   folder.updatedDate = now();
-  notify();
+  return notify();
 }
 
-export function deleteFolder(id: string): void {
+function isDescendantOfFolder(candidateId: string, ancestorId: string): boolean {
+  let current = db.folders.find((f) => f.id === candidateId);
+  while (current?.parentFolderId) {
+    if (current.parentFolderId === ancestorId) return true;
+    current = db.folders.find((f) => f.id === current!.parentFolderId);
+  }
+  return false;
+}
+
+export interface MoveFolderResult {
+  moved: boolean;
+  reason?: string;
+}
+
+export function moveFolder(id: string, newParentId: string | null): MoveFolderResult {
+  const folder = db.folders.find((f) => f.id === id);
+  if (!folder) return { moved: false, reason: 'Folder not found.' };
+  if (newParentId === id) {
+    return { moved: false, reason: "A folder can't be moved into itself." };
+  }
+  if (newParentId && isDescendantOfFolder(newParentId, id)) {
+    return { moved: false, reason: "Can't move a folder into one of its own subfolders." };
+  }
+  folder.parentFolderId = newParentId;
+  folder.updatedDate = now();
+  notify();
+  logEvent('Folder moved', `${id} -> ${newParentId ?? 'root'}`);
+  return { moved: true };
+}
+
+export interface DeleteFolderResult {
+  deleted: boolean;
+  reason?: string;
+}
+
+export function deleteFolder(id: string): DeleteFolderResult {
+  const hasSubfolders = db.folders.some((f) => f.parentFolderId === id);
+  const hasDogs = db.dogs.some((d) => d.folderId === id);
+  if (hasSubfolders || hasDogs) {
+    return {
+      deleted: false,
+      reason: 'This folder still has subfolders or dogs in it. Move or delete them first.',
+    };
+  }
   db.folders = db.folders.filter((f) => f.id !== id);
   notify();
   logEvent('Folder deleted', id);
+  return { deleted: true };
 }
 
 // ---- Dogs ----
@@ -174,6 +218,12 @@ export function updateDog(id: string, updates: Partial<Dog>): boolean {
   if (!dog) return false;
   Object.assign(dog, updates, { updatedDate: now() });
   return notify();
+}
+
+export function moveDog(id: string, newFolderId: string): boolean {
+  const persisted = updateDog(id, { folderId: newFolderId });
+  logEvent('Dog moved', `${id} -> folder ${newFolderId}`);
+  return persisted;
 }
 
 export function deleteDog(id: string): void {

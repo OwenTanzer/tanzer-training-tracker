@@ -1,11 +1,15 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Breadcrumbs } from '../components/Breadcrumbs';
 import { DogCard } from '../components/DogCard';
 import { FolderCard } from '../components/FolderCard';
+import { MoveDialog } from '../components/MoveDialog';
 import {
   createDog,
   createFolder,
+  deleteFolder,
+  moveFolder,
+  renameFolder,
   useChildFolders,
   useDogsInFolder,
   useFolder,
@@ -14,12 +18,16 @@ import {
 
 export function FolderView() {
   const { folderId = null } = useParams<{ folderId?: string }>();
+  const navigate = useNavigate();
   const folder = useFolder(folderId);
   const allFolders = useFolders();
   const childFolders = useChildFolders(folderId);
   const dogs = useDogsInFolder(folderId ?? '');
   const [newFolderName, setNewFolderName] = useState('');
   const [newDogName, setNewDogName] = useState('');
+  const [renamingSelf, setRenamingSelf] = useState(false);
+  const [selfName, setSelfName] = useState(folder?.name ?? '');
+  const [movingSelf, setMovingSelf] = useState(false);
 
   function handleAddFolder(e: React.FormEvent) {
     e.preventDefault();
@@ -35,13 +43,88 @@ export function FolderView() {
     setNewDogName('');
   }
 
+  function handleRenameSelfSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = selfName.trim();
+    if (folder && trimmed && trimmed !== folder.name) renameFolder(folder.id, trimmed);
+    setRenamingSelf(false);
+  }
+
+  function handleMoveSelfSelect(destinationId: string | null) {
+    if (!folder) return;
+    const result = moveFolder(folder.id, destinationId);
+    if (!result.moved) alert(result.reason);
+    setMovingSelf(false);
+  }
+
+  function handleDeleteSelf() {
+    if (!folder) return;
+    if (!confirm(`Delete folder "${folder.name}"?`)) return;
+    const result = deleteFolder(folder.id);
+    if (!result.deleted) {
+      alert(result.reason);
+      return;
+    }
+    navigate(folder.parentFolderId ? `/folder/${folder.parentFolderId}` : '/');
+  }
+
   return (
     <div className="max-w-3xl mx-auto p-4 space-y-6">
       <Breadcrumbs folder={folder} allFolders={allFolders} />
 
-      <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
-        {folder ? folder.name : 'All Folders'}
-      </h1>
+      {folder && renamingSelf ? (
+        <form onSubmit={handleRenameSelfSubmit} className="flex items-center gap-2">
+          <input
+            autoFocus
+            value={selfName}
+            onChange={(e) => setSelfName(e.target.value)}
+            onBlur={handleRenameSelfSubmit}
+            className="text-2xl font-semibold bg-transparent border-b border-sky-400 focus:outline-none text-gray-900 dark:text-gray-100"
+          />
+        </form>
+      ) : (
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
+            {folder ? folder.name : 'All Folders'}
+          </h1>
+          {folder && (
+            <div className="flex gap-0.5">
+              <button
+                title="Rename this folder"
+                onClick={() => {
+                  setSelfName(folder.name);
+                  setRenamingSelf(true);
+                }}
+                className="rounded p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                ✏️
+              </button>
+              <button
+                title="Move this folder"
+                onClick={() => setMovingSelf(true)}
+                className="rounded p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                📂
+              </button>
+              <button
+                title="Delete this folder"
+                onClick={handleDeleteSelf}
+                className="rounded p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
+              >
+                🗑️
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {folder && movingSelf && (
+        <MoveDialog
+          title={`Move "${folder.name}" to…`}
+          excludeFolderSubtreeId={folder.id}
+          onSelect={handleMoveSelfSelect}
+          onClose={() => setMovingSelf(false)}
+        />
+      )}
 
       <section className="space-y-2">
         <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
