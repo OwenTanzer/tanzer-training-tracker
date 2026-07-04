@@ -4,8 +4,21 @@ import type { Dog } from '../types';
 import { ProgressBar } from './ProgressBar';
 import { deleteDog, moveDog, updateDog } from '../data/store';
 import { MoveDialog } from './MoveDialog';
+import { MoveIcon, PencilIcon, TrashIcon } from './icons';
+import { SwipeRow } from './SwipeRow';
+import type { RowGesture } from './ReorderableList';
 
-export function DogCard({ dog }: { dog: Dog }) {
+export function DogCard({
+  dog,
+  gesture,
+  isDragging,
+  dragOffset,
+}: {
+  dog: Dog;
+  gesture: RowGesture;
+  isDragging: boolean;
+  dragOffset: { x: number; y: number };
+}) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(dog.name);
   const [moving, setMoving] = useState(false);
@@ -52,60 +65,70 @@ export function DogCard({ dog }: { dog: Dog }) {
   }
 
   return (
-    <div className="flex items-center gap-1 rounded-lg border border-gray-200 dark:border-gray-700 p-2 hover:border-sky-400 hover:shadow-sm transition">
-      <Link to={`/dog/${dog.id}`} className="flex flex-1 items-center gap-3 min-w-0 px-1 py-1">
-        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-2xl">
-          {dog.profilePhoto ? (
-            <img
-              src={dog.profilePhoto}
-              alt={dog.name}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            '🐕'
-          )}
+    <>
+      <SwipeRow
+        gesture={gesture}
+        isDragging={isDragging}
+        dragOffset={dragOffset}
+        actions={
+          <>
+            <button
+              title="Rename"
+              onClick={() => {
+                setName(dog.name);
+                setRenaming(true);
+              }}
+              className="flex flex-1 items-center justify-center bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+            >
+              <PencilIcon />
+            </button>
+            <button
+              title="Move"
+              onClick={() => setMoving(true)}
+              className="flex flex-1 items-center justify-center bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+            >
+              <MoveIcon />
+            </button>
+            <button
+              title="Delete"
+              onClick={handleDelete}
+              className="flex flex-1 items-center justify-center bg-red-500 text-white hover:bg-red-600"
+            >
+              <TrashIcon />
+            </button>
+          </>
+        }
+      >
+        <div className="flex items-center gap-1 rounded-lg border border-gray-200 dark:border-gray-700 p-2 hover:border-sky-400 hover:shadow-sm transition">
+          <Link to={`/dog/${dog.id}`} className="flex flex-1 items-center gap-3 min-w-0 px-1 py-1">
+            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-2xl">
+              {dog.profilePhoto ? (
+                <img
+                  src={dog.profilePhoto}
+                  alt={dog.name}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                '🐕'
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-medium truncate text-gray-900 dark:text-gray-100">
+                  {dog.name}
+                </p>
+                <span className="text-xs text-gray-500 shrink-0">{dog.currentPhase}</span>
+              </div>
+              <ProgressBar
+                progress={dog.graduationProgress}
+                status={dog.graduationStatus}
+                released={dog.released}
+                compact
+              />
+            </div>
+          </Link>
         </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <p className="font-medium truncate text-gray-900 dark:text-gray-100">
-              {dog.name}
-            </p>
-            <span className="text-xs text-gray-500 shrink-0">{dog.currentPhase}</span>
-          </div>
-          <ProgressBar
-            progress={dog.graduationProgress}
-            status={dog.graduationStatus}
-            released={dog.released}
-            compact
-          />
-        </div>
-      </Link>
-      <div className="flex shrink-0 gap-0.5">
-        <button
-          title="Rename"
-          onClick={() => {
-            setName(dog.name);
-            setRenaming(true);
-          }}
-          className="rounded p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800"
-        >
-          ✏️
-        </button>
-        <button
-          title="Move"
-          onClick={() => setMoving(true)}
-          className="rounded p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800"
-        >
-          📂
-        </button>
-        <button
-          title="Delete"
-          onClick={handleDelete}
-          className="rounded p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
-        >
-          🗑️
-        </button>
-      </div>
+      </SwipeRow>
       {moving && (
         <MoveDialog
           title={`Move ${dog.name} to…`}
@@ -114,6 +137,6 @@ export function DogCard({ dog }: { dog: Dog }) {
           onClose={() => setMoving(false)}
         />
       )}
-    </div>
+    </>
   );
 }

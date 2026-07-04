@@ -120,14 +120,18 @@ export function useFolder(id: string | null): Folder | undefined {
 }
 
 export function useChildFolders(parentFolderId: string | null): Folder[] {
-  return useDatabase().folders.filter((f) => f.parentFolderId === parentFolderId);
+  return useDatabase()
+    .folders.filter((f) => f.parentFolderId === parentFolderId)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
 export function createFolder(name: string, parentFolderId: string | null): Folder {
+  const siblingCount = db.folders.filter((f) => f.parentFolderId === parentFolderId).length;
   const folder: Folder = {
     id: uid(),
     name,
     parentFolderId,
+    sortOrder: siblingCount,
     createdDate: now(),
     updatedDate: now(),
   };
@@ -135,6 +139,15 @@ export function createFolder(name: string, parentFolderId: string | null): Folde
   notify();
   logEvent('Folder created', folder.name);
   return folder;
+}
+
+export function reorderFolders(parentFolderId: string | null, orderedIds: string[]): void {
+  orderedIds.forEach((id, index) => {
+    const folder = db.folders.find((f) => f.id === id && f.parentFolderId === parentFolderId);
+    if (folder) folder.sortOrder = index;
+  });
+  notify();
+  logEvent('Folders reordered', `parent ${parentFolderId ?? 'root'}`);
 }
 
 export function renameFolder(id: string, name: string): boolean {
@@ -168,7 +181,11 @@ export function moveFolder(id: string, newParentId: string | null): MoveFolderRe
   if (newParentId && isDescendantOfFolder(newParentId, id)) {
     return { moved: false, reason: "Can't move a folder into one of its own subfolders." };
   }
+  const siblingCount = db.folders.filter(
+    (f) => f.parentFolderId === newParentId && f.id !== id,
+  ).length;
   folder.parentFolderId = newParentId;
+  folder.sortOrder = siblingCount;
   folder.updatedDate = now();
   notify();
   logEvent('Folder moved', `${id} -> ${newParentId ?? 'root'}`);
@@ -198,7 +215,9 @@ export function deleteFolder(id: string): DeleteFolderResult {
 // ---- Dogs ----
 
 export function useDogsInFolder(folderId: string): Dog[] {
-  return useDatabase().dogs.filter((d) => d.folderId === folderId);
+  return useDatabase()
+    .dogs.filter((d) => d.folderId === folderId)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
 export function useDog(id: string | undefined): Dog | undefined {
@@ -210,11 +229,13 @@ export function createDog(
   folderId: string,
   profilePhoto: string | null = null,
 ): Dog {
+  const siblingCount = db.dogs.filter((d) => d.folderId === folderId).length;
   const dog: Dog = {
     id: uid(),
     name,
     profilePhoto,
     folderId,
+    sortOrder: siblingCount,
     currentPhase: 'Phase 1',
     graduationProgress: 0,
     graduationStatus: 'Not Started',
@@ -227,6 +248,15 @@ export function createDog(
   notify();
   logEvent('Dog created', dog.name);
   return dog;
+}
+
+export function reorderDogs(folderId: string, orderedIds: string[]): void {
+  orderedIds.forEach((id, index) => {
+    const dog = db.dogs.find((d) => d.id === id && d.folderId === folderId);
+    if (dog) dog.sortOrder = index;
+  });
+  notify();
+  logEvent('Dogs reordered', `folder ${folderId}`);
 }
 
 export function updateDog(id: string, updates: Partial<Dog>): boolean {
@@ -259,7 +289,10 @@ export function reactivateDog(id: string): boolean {
 }
 
 export function moveDog(id: string, newFolderId: string): boolean {
-  const persisted = updateDog(id, { folderId: newFolderId });
+  const siblingCount = db.dogs.filter(
+    (d) => d.folderId === newFolderId && d.id !== id,
+  ).length;
+  const persisted = updateDog(id, { folderId: newFolderId, sortOrder: siblingCount });
   logEvent('Dog moved', `${id} -> folder ${newFolderId}`);
   return persisted;
 }
