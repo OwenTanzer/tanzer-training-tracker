@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
-:root {
-  color-scheme: light dark;
-}
+/* Dark mode is switched explicitly via a `.dark` class on <html> (set by
+   src/lib/theme.ts), not the OS's prefers-color-scheme, so the in-app
+   toggle can override the device setting. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 body {
   margin: 0;

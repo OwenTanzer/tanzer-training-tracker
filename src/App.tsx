@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, Route, Routes } from 'react-router-dom';
 import { LoadingScreen } from './components/LoadingScreen';
+import { ThemeToggle } from './components/ThemeToggle';
 import { Diagnostics } from './pages/Diagnostics';
 import { DogProfile } from './pages/DogProfile';
 import { FolderView } from './pages/FolderView';
@@ -31,6 +32,7 @@ function App() {
           <Link to="/diagnostics" className="text-sm text-gray-500 hover:underline">
             🩺 Diagnostics
           </Link>
+          <ThemeToggle />
         </div>
       </header>
       <Routes>

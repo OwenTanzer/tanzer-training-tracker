@@ -5,6 +5,7 @@ import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { installGlobalErrorLogging, logEvent } from './lib/diagnostics'
+import './lib/theme'
 
 installGlobalErrorLogging()
 logEvent('App booted', `commit ${__APP_COMMIT_SHA__}, built ${__APP_BUILD_TIME__}`)
