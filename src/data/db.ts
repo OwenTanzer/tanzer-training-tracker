@@ -25,7 +25,7 @@ export interface Database {
 
 const STORAGE_KEY = 'abbys-dog-chej:db:v1';
 
-function emptyDatabase(): Database {
+export function emptyDatabase(): Database {
   return {
     folders: [],
     dogs: [],
@@ -144,7 +144,7 @@ function backfillCompletions(completions: DogChecklistCompletion[]): DogChecklis
   }));
 }
 
-function normalizeDatabase(parsed: Record<string, unknown>): Database {
+export function normalizeDatabase(parsed: Record<string, unknown>): Database {
   if (
     Array.isArray(parsed.milestoneTemplates) &&
     Array.isArray(parsed.dogMilestoneCompletions)
@@ -175,10 +175,13 @@ function normalizeDatabase(parsed: Record<string, unknown>): Database {
         : buildDefaultMilestones(),
     dogMilestoneCompletions: migrated.dogMilestoneCompletions,
   };
-  saveDatabase(database);
   return database;
 }
 
+// Reads/writes the legacy single-browser key. normalizeDatabase itself is a
+// pure function (safe to reuse for server-fetched blobs too, e.g. from
+// store.ts) — this is the only place that persists an upgraded shape back to
+// that specific key, since it's the only caller that owns it.
 export function loadDatabase(): Database {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) {
@@ -187,7 +190,9 @@ export function loadDatabase(): Database {
     return db;
   }
   try {
-    return normalizeDatabase(JSON.parse(raw));
+    const db = normalizeDatabase(JSON.parse(raw));
+    saveDatabase(db);
+    return db;
   } catch {
     const db = emptyDatabase();
     saveDatabase(db);
@@ -202,4 +207,87 @@ export function saveDatabase(db: Database): boolean {
   } catch {
     return false;
   }
+}
+
+// Server-backed accounts cache their last-synced blob under a key scoped to
+// the instructor, completely separate from the legacy single-browser
+// STORAGE_KEY above — that key is reserved for Phase 4's "import this
+// browser's existing data" migration and must never be overwritten by the
+// server-backed code path, or the very data that migration needs to read
+// would be destroyed before it ships.
+function serverCacheKey(instructorId: string): string {
+  return `abbys-dog-chej:server-cache:${instructorId}`;
+}
+
+export interface ServerCacheEntry {
+  blob: Database;
+  // The server's updated_at as of the last confirmed sync, not a value made
+  // up for this cache entry — callers must pass through their own
+  // lastKnownUpdatedAt. This is what lets a later PUT built from this cache
+  // (e.g. after an offline fallback) still use optimistic concurrency
+  // correctly instead of being forced into a blind unconditional write.
+  updatedAt: string | null;
+}
+
+export function loadServerCache(instructorId: string): ServerCacheEntry | null {
+  try {
+    const raw = localStorage.getItem(serverCacheKey(instructorId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ServerCacheEntry> | null;
+    if (!parsed || typeof parsed !== 'object' || !parsed.blob) return null;
+    return {
+      blob: normalizeDatabase(parsed.blob as unknown as Record<string, unknown>),
+      updatedAt: parsed.updatedAt ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveServerCache(
+  instructorId: string,
+  blob: Database,
+  updatedAt: string | null,
+): boolean {
+  try {
+    const entry: ServerCacheEntry = { blob, updatedAt };
+    localStorage.setItem(serverCacheKey(instructorId), JSON.stringify(entry));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Marks whether the legacy STORAGE_KEY blob has already been offered for
+// import into a server account (either imported or explicitly declined), so
+// a device isn't re-prompted on every future login.
+const LEGACY_CLAIMED_KEY = 'abbys-dog-chej:db:v1:claimed';
+
+// Side-effect-free read of the legacy key — unlike loadDatabase(), never
+// writes STORAGE_KEY, since this is only used to peek at pre-migration data
+// for the one-time import prompt, not to adopt it as the active database.
+export function peekLegacyDatabase(): Database | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? normalizeDatabase(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function hasLegacyContent(db: Database): boolean {
+  return (
+    db.folders.length > 0 ||
+    db.dogs.length > 0 ||
+    db.reports.length > 0 ||
+    db.locations.length > 0
+  );
+}
+
+export function isLegacyDataClaimed(): boolean {
+  return localStorage.getItem(LEGACY_CLAIMED_KEY) === 'true';
+}
+
+export function markLegacyDataClaimed(): void {
+  localStorage.setItem(LEGACY_CLAIMED_KEY, 'true');
 }

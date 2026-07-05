@@ -12,13 +12,15 @@ export function PhotoCropDialog({
 }: {
   file: File;
   onCancel: () => void;
-  onConfirm: (dataUrl: string) => void;
+  onConfirm: (blob: Blob) => Promise<void>;
 }) {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [minScale, setMinScale] = useState(1);
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const dragRef = useRef<{ startX: number; startY: number; origin: { x: number; y: number } } | null>(
     null,
   );
@@ -96,7 +98,23 @@ export function PhotoCropDialog({
     const img = new Image();
     img.onload = () => {
       ctx.drawImage(img, sx, sy, sSize, sSize, 0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
-      onConfirm(canvas.toDataURL('image/jpeg', OUTPUT_QUALITY));
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            setSaveError("Couldn't process that photo. Try a different one.");
+            return;
+          }
+          setSaving(true);
+          setSaveError(null);
+          onConfirm(blob)
+            .catch(() => {
+              setSaveError("Couldn't save that photo. Check your connection and try again.");
+            })
+            .finally(() => setSaving(false));
+        },
+        'image/jpeg',
+        OUTPUT_QUALITY,
+      );
     };
     img.src = objectUrl;
   }
@@ -149,19 +167,21 @@ export function PhotoCropDialog({
           />
         </div>
         <p className="text-xs text-gray-400 text-center">Drag to reposition, use the slider to zoom</p>
+        {saveError && <p className="text-xs text-red-500 text-center">{saveError}</p>}
         <div className="flex justify-end gap-2">
           <button
             onClick={onCancel}
-            className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm"
+            disabled={saving}
+            className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={handleConfirm}
-            disabled={!natural}
+            disabled={!natural || saving}
             className="rounded-md bg-sky-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-600 disabled:opacity-50"
           >
-            Save Photo
+            {saving ? 'Saving…' : 'Save Photo'}
           </button>
         </div>
       </div>

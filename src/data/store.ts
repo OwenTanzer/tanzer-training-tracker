@@ -11,11 +11,44 @@ import type {
   PhaseChecklistItem,
   TrainingReport,
 } from '../types';
-import { loadDatabase, saveDatabase, type Database } from './db';
+import {
+  emptyDatabase,
+  hasLegacyContent,
+  isLegacyDataClaimed,
+  loadServerCache,
+  markLegacyDataClaimed,
+  normalizeDatabase,
+  peekLegacyDatabase,
+  saveServerCache,
+  type Database,
+} from './db';
 import { logError, logEvent } from '../lib/diagnostics';
+import { ApiError, fetchData, putData, uploadPhoto } from '../lib/api';
+import { dataUrlToBlob } from '../lib/compressImage';
 
-let db: Database = loadDatabase();
+let db: Database = emptyDatabase();
+let currentInstructorId: string | null = null;
+let hydrated = false;
+let lastKnownUpdatedAt: string | null = null;
+
+// Bumped by every hydrateFromServer()/resetLocalStore() call (i.e. every
+// session transition). Async work kicked off by an earlier generation checks
+// this before applying its result, so a slow response from a session the
+// user has since logged out of (or switched away from) can't resurrect that
+// session's data into the current one — including PUTting it onto whatever
+// account is now active.
+let generation = 0;
+
+export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
+let syncStatus: SyncStatus = 'idle';
+let syncInFlight = false;
+let pendingSync = false;
+
 const listeners = new Set<() => void>();
+
+function notifyListeners() {
+  listeners.forEach((listener) => listener());
+}
 
 function notify(): boolean {
   // Store actions mutate nested arrays/objects in place for simplicity, but
@@ -23,15 +56,255 @@ function notify(): boolean {
   // without this shallow clone, React can skip re-rendering after a mutation
   // and the UI won't reflect the change until something else forces a render.
   db = { ...db };
-  const persisted = saveDatabase(db);
-  if (!persisted) {
-    logError(
-      'Local storage save failed',
-      'Browser storage is likely full. Try removing an old photo or report, then save again.',
-    );
+  let persistedLocally = true;
+  if (currentInstructorId) {
+    persistedLocally = saveServerCache(currentInstructorId, db, lastKnownUpdatedAt);
+    if (!persistedLocally) {
+      logError(
+        'Local cache save failed',
+        'Browser storage is likely full. Try removing an old photo or report, then save again.',
+      );
+    }
   }
-  listeners.forEach((listener) => listener());
-  return persisted;
+  notifyListeners();
+  syncToServer();
+  return persistedLocally;
+}
+
+// The server holds one JSON blob per instructor. Rather than sending a PUT
+// per mutation (which would race against itself — two rapid edits could
+// send the same expectedUpdatedAt and the second would spuriously 409
+// against its own sibling, not a real cross-device conflict), in-flight
+// writes are serialized: at most one PUT runs at a time, and any mutation
+// that arrives while one is in flight just marks "there's newer state to
+// send" rather than firing a second concurrent request. When the in-flight
+// one finishes, the latest db/lastKnownUpdatedAt goes out next.
+function syncToServer(): void {
+  if (!hydrated) return;
+  if (syncInFlight) {
+    pendingSync = true;
+    return;
+  }
+  runSync();
+}
+
+function runSync(): void {
+  const myGeneration = generation;
+  syncInFlight = true;
+  syncStatus = 'syncing';
+  notifyListeners();
+  const blobSnapshot = db;
+  const expectedUpdatedAt = lastKnownUpdatedAt ?? undefined;
+  putData(blobSnapshot, expectedUpdatedAt)
+    .then((res) => {
+      if (myGeneration !== generation) return;
+      lastKnownUpdatedAt = res.updatedAt;
+      syncStatus = 'synced';
+      // notify()'s cache write happens synchronously at edit time, tagged
+      // with whatever lastKnownUpdatedAt was *before* this PUT — it can't
+      // know the new value this PUT is about to confirm. Re-saving here with
+      // the blob+updatedAt pair that's now actually confirmed keeps the
+      // cache from drifting stale relative to the server, which is what an
+      // offline-fallback recovery's next save depends on to avoid a false
+      // 409 (or, with an even staler cache, a blind overwrite).
+      if (currentInstructorId) saveServerCache(currentInstructorId, blobSnapshot, res.updatedAt);
+    })
+    .catch((err: unknown) => {
+      if (myGeneration !== generation) return;
+      syncStatus = 'error';
+      if (err instanceof ApiError && err.status === 409) {
+        logError(
+          'Changes not saved',
+          "Your data changed elsewhere (another tab or device) — reload the page before continuing so you don't lose recent changes.",
+        );
+      } else if (err instanceof ApiError && err.status === 401) {
+        logError('Signed out', 'Your session expired — log back in to keep syncing your changes.');
+      } else {
+        logError(
+          'Changes not synced yet',
+          'Could not reach the server. This change is saved on this device and will sync once back online.',
+        );
+      }
+    })
+    .finally(() => {
+      // A stale generation's request must not touch syncInFlight/pendingSync
+      // at all once a newer session has started — resetLocalStore() already
+      // reset both explicitly for the new generation, and by now they may
+      // correctly reflect a genuinely in-flight request of *its own*.
+      // Unconditionally clearing syncInFlight here would falsely "unlock"
+      // that request mid-flight, letting a second one for the same new
+      // session fire concurrently — exactly the same-account self-race this
+      // queue exists to prevent.
+      if (myGeneration !== generation) return;
+      syncInFlight = false;
+      notifyListeners();
+      if (pendingSync) {
+        pendingSync = false;
+        runSync();
+      }
+    });
+}
+
+export async function hydrateFromServer(instructorId: string): Promise<void> {
+  const myGeneration = ++generation;
+  currentInstructorId = instructorId;
+  try {
+    const { blob, updatedAt } = await fetchData();
+    // A newer session (another hydrate, or a logout) has since taken over —
+    // this response belongs to a session that's no longer active, so drop it
+    // rather than resurrecting its data (and instructorId) as if it were current.
+    if (myGeneration !== generation) return;
+    db = normalizeDatabase(blob as Record<string, unknown>);
+    lastKnownUpdatedAt = updatedAt;
+    hydrated = true;
+    syncStatus = 'synced';
+    notifyListeners();
+  } catch (err) {
+    if (myGeneration !== generation) return;
+    // Offline fallback: fall back to this instructor's last-synced local
+    // cache rather than blocking entirely, but only for a genuine network
+    // failure — an auth error means the cache may belong to a session that's
+    // no longer valid, so surface that instead of silently showing stale data.
+    if (err instanceof ApiError && err.status === 0) {
+      const cached = loadServerCache(instructorId);
+      if (cached) {
+        db = cached.blob;
+        // Carrying over the updatedAt this cache was last confirmed against
+        // (not discarding it) is what keeps optimistic concurrency intact
+        // across an offline period — without it, the next edit's PUT would
+        // go out with expectedUpdatedAt undefined, which the Worker treats
+        // as an unconditional write, silently clobbering anything written
+        // by another device in the meantime instead of correctly 409-ing.
+        lastKnownUpdatedAt = cached.updatedAt;
+        hydrated = true;
+        syncStatus = 'error';
+        logError('Showing offline copy', "Could not reach the server, so you're seeing this device's last synced copy.");
+        notifyListeners();
+        return;
+      }
+    }
+    throw err;
+  }
+}
+
+// A brand-new account's server blob has empty checklist/milestone arrays —
+// the Worker deliberately doesn't know the app's default templates, so the
+// client seeds them once here (the same defaults a fresh local install has
+// always gotten via emptyDatabase()), right after the first successful hydrate.
+export function seedDefaultTemplatesIfEmpty(): void {
+  if (db.checklistItems.length > 0 || db.milestoneTemplates.length > 0) return;
+  const defaults = emptyDatabase();
+  db = { ...db, checklistItems: defaults.checklistItems, milestoneTemplates: defaults.milestoneTemplates };
+  notifyListeners();
+  syncToServer();
+}
+
+// If this device already ran the pre-backend version of the app, it has real
+// data sitting in the legacy single-browser key. Only surfaced when the
+// signed-in account's server blob is still empty — never offered against an
+// account that already has real data, since importing would silently
+// overwrite it via a whole-blob PUT.
+//
+// This stays available across dismissals on purpose: the legacy blob is only
+// ever marked claimed by a *successful* import or an *explicit* "I don't want
+// this" decline (see declineLegacyImport), never by a casual "not now" —
+// closing the prompt, reloading, or navigating away must not burn the one
+// obvious bridge back to a device's only copy of its pre-account data.
+export function getImportableLegacyDatabase(): Database | null {
+  if (isLegacyDataClaimed()) return null;
+  if (hasLegacyContent(db)) return null;
+  const legacy = peekLegacyDatabase();
+  return legacy && hasLegacyContent(legacy) ? legacy : null;
+}
+
+// Permanently stops offering the import. Only call this from an explicit,
+// deliberately-confirmed "I don't want to import this" action — never from a
+// plain dismiss/"not now", which should just hide the prompt for now without
+// touching this.
+export function declineLegacyImport(): void {
+  markLegacyDataClaimed();
+  notifyListeners();
+}
+
+// Reactive (unlike calling getImportableLegacyDatabase() directly in a render
+// body), so a badge driven by this updates the moment an import completes or
+// gets declined elsewhere — e.g. from the Diagnostics page, a route Diagnostics
+// itself is mounted under, not the component holding this hook.
+export function useLegacyImportAvailable(): boolean {
+  return useSyncExternalStore(subscribe, () => getImportableLegacyDatabase() !== null);
+}
+
+async function uploadEmbeddedPhoto(value: string | null): Promise<string | null> {
+  if (!value || !value.startsWith('data:')) return value;
+  const blob = await dataUrlToBlob(value);
+  const { url } = await uploadPhoto(blob);
+  return url;
+}
+
+// Legacy photos are embedded as base64 data: URLs; the server blob expects
+// R2 URLs instead, so each one is uploaded individually before the whole-blob
+// PUT. Left un-caught on failure (see importLegacyDatabase) so the caller can
+// offer a retry rather than importing with some photos silently dropped.
+async function migratePhotosToServer(source: Database): Promise<Database> {
+  const dogs = await Promise.all(
+    source.dogs.map(async (dog) => ({
+      ...dog,
+      profilePhoto: await uploadEmbeddedPhoto(dog.profilePhoto),
+    })),
+  );
+  const reports = await Promise.all(
+    source.reports.map(async (report) => ({
+      ...report,
+      picture: await uploadEmbeddedPhoto(report.picture),
+    })),
+  );
+  const dogMilestoneCompletions = await Promise.all(
+    source.dogMilestoneCompletions.map(async (completion) => ({
+      ...completion,
+      photo: await uploadEmbeddedPhoto(completion.photo),
+    })),
+  );
+  return { ...source, dogs, reports, dogMilestoneCompletions };
+}
+
+// Runs outside the normal serialized sync queue and awaits the PUT directly
+// (rather than the fire-and-forget syncToServer()) so the caller can show a
+// real success/failure result and only mark the legacy data claimed once
+// it's actually confirmed saved on the server.
+export async function importLegacyDatabase(legacy: Database): Promise<void> {
+  const myGeneration = generation;
+  const migrated = await migratePhotosToServer(legacy);
+  const expectedUpdatedAt = lastKnownUpdatedAt ?? undefined;
+  const { updatedAt } = await putData(migrated, expectedUpdatedAt);
+  // The session this import was started for is no longer active (e.g. the
+  // user logged out mid-upload) — the data landed on the server under that
+  // session's account, but applying it to *this* generation's local state
+  // would show one account's just-imported data under a different one.
+  if (myGeneration !== generation) return;
+  db = migrated;
+  lastKnownUpdatedAt = updatedAt;
+  syncStatus = 'synced';
+  if (currentInstructorId) saveServerCache(currentInstructorId, db, lastKnownUpdatedAt);
+  markLegacyDataClaimed();
+  notifyListeners();
+}
+
+export function resetLocalStore(): void {
+  generation++;
+  db = emptyDatabase();
+  currentInstructorId = null;
+  hydrated = false;
+  lastKnownUpdatedAt = null;
+  syncStatus = 'idle';
+  // A PUT belonging to the session being closed may still be in flight (its
+  // completion handlers are now moot — see the generation check in
+  // runSync()'s .finally()). Declaring the queue empty here, rather than
+  // leaving it to that request's own cleanup, means the next session starts
+  // with a genuinely clean slate instead of possibly waiting on (or being
+  // silently gated behind) a request nobody cares about anymore.
+  syncInFlight = false;
+  pendingSync = false;
+  notifyListeners();
 }
 
 function subscribe(listener: () => void) {
@@ -41,6 +314,14 @@ function subscribe(listener: () => void) {
 
 function useDatabase(): Database {
   return useSyncExternalStore(subscribe, () => db);
+}
+
+export function useHydrated(): boolean {
+  return useSyncExternalStore(subscribe, () => hydrated);
+}
+
+export function useSyncStatus(): SyncStatus {
+  return useSyncExternalStore(subscribe, () => syncStatus);
 }
 
 export interface DatabaseCounts {

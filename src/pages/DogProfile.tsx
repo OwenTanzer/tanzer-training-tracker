@@ -4,6 +4,7 @@ import { MoveDialog } from '../components/MoveDialog';
 import { PencilIcon } from '../components/icons';
 import { PhotoCropDialog } from '../components/PhotoCropDialog';
 import { ProgressBar } from '../components/ProgressBar';
+import { uploadPhoto } from '../lib/api';
 import {
   deleteDog,
   moveDog,
@@ -68,10 +69,11 @@ export function DogProfile() {
     setPendingPhotoFile(file);
   }
 
-  function handleCropConfirm(dataUrl: string) {
-    setPendingPhotoFile(null);
+  async function handleCropConfirm(blob: Blob) {
     if (!dog) return;
-    const persisted = updateDog(dog.id, { profilePhoto: dataUrl });
+    const { url } = await uploadPhoto(blob);
+    setPendingPhotoFile(null);
+    const persisted = updateDog(dog.id, { profilePhoto: url });
     if (!persisted) {
       setPhotoError(
         "Photo didn't save — your browser's storage is likely full. Try removing an old photo or report.",

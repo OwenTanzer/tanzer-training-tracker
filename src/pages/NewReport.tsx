@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { compressImageToDataUrl } from '../lib/compressImage';
+import { ApiError, uploadPhoto } from '../lib/api';
+import { compressImageToBlob } from '../lib/compressImage';
 import {
   createLocation,
   createReport,
@@ -21,11 +22,27 @@ export function NewReport() {
   const [locationId, setLocationId] = useState('');
   const [newLocationName, setNewLocationName] = useState('');
   const [notes, setNotes] = useState('');
-  const [picture, setPicture] = useState<string | null>(null);
+  // The photo is only uploaded to R2 on submit, not on selection — uploading
+  // eagerly would leave an orphaned object in R2 whenever the user picks a
+  // photo and then abandons the form without saving.
+  const [pictureFile, setPictureFile] = useState<File | null>(null);
+  const [picturePreviewUrl, setPicturePreviewUrl] = useState<string | null>(null);
+  // Set once the current pictureFile has actually been uploaded, so a retry
+  // after a failed report save (e.g. local storage full) reuses that R2
+  // object instead of uploading a second copy of the same photo.
+  const [uploadedPictureUrl, setUploadedPictureUrl] = useState<string | null>(null);
   const [pictureError, setPictureError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [skillIds, setSkillIds] = useState<string[]>([]);
   const skillsForPhase = useChecklistItems(phase);
+
+  useEffect(() => {
+    if (!pictureFile) return;
+    const url = URL.createObjectURL(pictureFile);
+    setPicturePreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [pictureFile]);
 
   if (!dog || !dogId) {
     return <p className="p-4 text-gray-500">Dog not found.</p>;
@@ -42,40 +59,55 @@ export function NewReport() {
     );
   }
 
-  async function handlePictureChange(e: React.ChangeEvent<HTMLInputElement>) {
+  function handlePictureChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     setPictureError(null);
-    try {
-      setPicture(await compressImageToDataUrl(file));
-    } catch {
-      setPictureError("Couldn't process that photo. Try a different one.");
-    }
+    setPictureFile(file);
+    setUploadedPictureUrl(null);
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitError(null);
-    let finalLocationId: string | null = locationId || null;
-    if (!finalLocationId && newLocationName.trim()) {
-      finalLocationId = createLocation(newLocationName.trim()).id;
-    }
-    const { persisted } = createReport({
-      dogId: dogId!,
-      phase,
-      redFlag,
-      locationId: finalLocationId,
-      notes,
-      picture,
-      skillIds,
-    });
-    if (!persisted) {
-      setSubmitError(
-        "This report didn't save — your browser's storage is likely full. Try removing an old photo or report, then save again.",
+    setPictureError(null);
+    setSaving(true);
+    try {
+      let picture: string | null = uploadedPictureUrl;
+      if (pictureFile && !picture) {
+        const blob = await compressImageToBlob(pictureFile);
+        const uploaded = await uploadPhoto(blob);
+        picture = uploaded.url;
+        setUploadedPictureUrl(uploaded.url);
+      }
+      let finalLocationId: string | null = locationId || null;
+      if (!finalLocationId && newLocationName.trim()) {
+        finalLocationId = createLocation(newLocationName.trim()).id;
+      }
+      const { persisted } = createReport({
+        dogId: dogId!,
+        phase,
+        redFlag,
+        locationId: finalLocationId,
+        notes,
+        picture,
+        skillIds,
+      });
+      if (!persisted) {
+        setSubmitError(
+          "This report didn't save — your browser's storage is likely full. Try removing an old photo or report, then save again.",
+        );
+        return;
+      }
+      navigate(`/dog/${dogId}`);
+    } catch (err) {
+      setPictureError(
+        err instanceof ApiError ? err.message : "Couldn't upload that photo. Try again.",
       );
-      return;
+    } finally {
+      setSaving(false);
     }
-    navigate(`/dog/${dogId}`);
   }
 
   return (
@@ -178,8 +210,12 @@ export function NewReport() {
             Picture
           </label>
           <input type="file" accept="image/*" onChange={handlePictureChange} />
-          {picture && (
-            <img src={picture} alt="Preview" className="mt-2 h-24 w-24 rounded-md object-cover" />
+          {picturePreviewUrl && (
+            <img
+              src={picturePreviewUrl}
+              alt="Preview"
+              className="mt-2 h-24 w-24 rounded-md object-cover"
+            />
           )}
           {pictureError && <p className="mt-1 text-xs text-red-500">{pictureError}</p>}
         </div>
@@ -188,9 +224,10 @@ export function NewReport() {
 
         <button
           type="submit"
-          className="rounded-md bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600"
+          disabled={saving}
+          className="rounded-md bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600 disabled:opacity-50"
         >
-          Save Report
+          {saving ? 'Saving…' : 'Save Report'}
         </button>
       </form>
     </div>

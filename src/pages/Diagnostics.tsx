@@ -1,6 +1,13 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { clearLog, useDiagnosticLog } from '../lib/diagnostics';
-import { useDatabaseCounts } from '../data/store';
+import {
+  declineLegacyImport,
+  getImportableLegacyDatabase,
+  importLegacyDatabase,
+  useDatabaseCounts,
+} from '../data/store';
+import type { Database } from '../data/db';
 
 function storageProbe(): string {
   try {
@@ -16,6 +23,34 @@ function storageProbe(): string {
 export function Diagnostics() {
   const log = useDiagnosticLog();
   const counts = useDatabaseCounts();
+  // Computed once per visit to this page (a fresh mount each time it's
+  // navigated to), not tracked reactively — this is the persistent entry
+  // point back to the legacy-data import for anyone who dismissed the
+  // main prompt with "Not now" rather than actually importing or declining.
+  const [legacy, setLegacy] = useState<Database | null>(() => getImportableLegacyDatabase());
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  function handleImportLegacy() {
+    if (!legacy) return;
+    setImporting(true);
+    setImportError(null);
+    importLegacyDatabase(legacy)
+      .then(() => setLegacy(null))
+      .catch((err: unknown) => {
+        setImportError(err instanceof Error ? err.message : "Couldn't import that data.");
+      })
+      .finally(() => setImporting(false));
+  }
+
+  function handlePermanentlyDeclineLegacy() {
+    const confirmed = window.confirm(
+      "Don't import this data? This can't be undone — this device won't offer to import it again.",
+    );
+    if (!confirmed) return;
+    declineLegacyImport();
+    setLegacy(null);
+  }
 
   function handleCopy() {
     const lines = [
@@ -41,6 +76,38 @@ export function Diagnostics() {
       <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
         Diagnostics
       </h1>
+
+      {legacy && (
+        <section className="rounded-md border border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950 p-4 space-y-3">
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+            Import data from before accounts existed
+          </h2>
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            This device has {legacy.folders.length} folder{legacy.folders.length === 1 ? '' : 's'},{' '}
+            {legacy.dogs.length} dog{legacy.dogs.length === 1 ? '' : 's'}, and {legacy.reports.length}{' '}
+            training report{legacy.reports.length === 1 ? '' : 's'} saved locally from before your
+            account existed. Import it into your account so it's backed up and available on your
+            other devices.
+          </p>
+          {importError && <p className="text-sm text-red-500">{importError}</p>}
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={handleImportLegacy}
+              disabled={importing}
+              className="rounded-md bg-sky-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-600 disabled:opacity-50"
+            >
+              {importing ? 'Importing…' : 'Import my data'}
+            </button>
+            <button
+              onClick={handlePermanentlyDeclineLegacy}
+              disabled={importing}
+              className="text-xs text-gray-400 hover:underline disabled:opacity-50"
+            >
+              This isn't my data — don't ask again
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="space-y-1 text-sm">
         <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">

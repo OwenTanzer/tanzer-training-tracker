@@ -1,8 +1,7 @@
-export function compressImageToDataUrl(
+function loadAndDrawToCanvas(
   file: File,
-  maxDimension = 1024,
-  quality = 0.8,
-): Promise<string> {
+  maxDimension: number,
+): Promise<HTMLCanvasElement> {
   return new Promise((resolve, reject) => {
     const objectUrl = URL.createObjectURL(file);
     const img = new Image();
@@ -23,7 +22,7 @@ export function compressImageToDataUrl(
         return;
       }
       ctx.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL('image/jpeg', quality));
+      resolve(canvas);
     };
 
     img.onerror = () => {
@@ -32,5 +31,30 @@ export function compressImageToDataUrl(
     };
 
     img.src = objectUrl;
+  });
+}
+
+// Legacy locally-stored photos are embedded as base64 data: URLs; fetch()
+// supports data: URLs directly, so this is all conversion to a Blob needs.
+export async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const res = await fetch(dataUrl);
+  return res.blob();
+}
+
+export async function compressImageToBlob(
+  file: File,
+  maxDimension = 1024,
+  quality = 0.8,
+): Promise<Blob> {
+  const canvas = await loadAndDrawToCanvas(file, maxDimension);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error('Could not encode that image'));
+      },
+      'image/jpeg',
+      quality,
+    );
   });
 }
