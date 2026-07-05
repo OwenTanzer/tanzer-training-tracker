@@ -1,0 +1,16 @@
+name = "abbys-dog-chej-api"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "abbys-dog-chej"
+database_id = "d7c4c057-440e-4daa-a738-2d7b3aace4a0"
+
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "abbys-dog-chej-photos"
+
+[vars]
+# Comma-separated list of frontend origins allowed to call this API.
+ALLOWED_ORIGINS = "https://owentanzer.github.io,http://localhost:5173"
