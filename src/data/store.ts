@@ -31,6 +31,14 @@ let currentInstructorId: string | null = null;
 let hydrated = false;
 let lastKnownUpdatedAt: string | null = null;
 
+// Bumped by every hydrateFromServer()/resetLocalStore() call (i.e. every
+// session transition). Async work kicked off by an earlier generation checks
+// this before applying its result, so a slow response from a session the
+// user has since logged out of (or switched away from) can't resurrect that
+// session's data into the current one — including PUTting it onto whatever
+// account is now active.
+let generation = 0;
+
 export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
 let syncStatus: SyncStatus = 'idle';
 let syncInFlight = false;
@@ -81,6 +89,7 @@ function syncToServer(): void {
 }
 
 function runSync(): void {
+  const myGeneration = generation;
   syncInFlight = true;
   syncStatus = 'syncing';
   notifyListeners();
@@ -88,10 +97,12 @@ function runSync(): void {
   const expectedUpdatedAt = lastKnownUpdatedAt ?? undefined;
   putData(blobSnapshot, expectedUpdatedAt)
     .then((res) => {
+      if (myGeneration !== generation) return;
       lastKnownUpdatedAt = res.updatedAt;
       syncStatus = 'synced';
     })
     .catch((err: unknown) => {
+      if (myGeneration !== generation) return;
       syncStatus = 'error';
       if (err instanceof ApiError && err.status === 409) {
         logError(
@@ -108,6 +119,15 @@ function runSync(): void {
       }
     })
     .finally(() => {
+      // A stale generation's request must not touch syncInFlight/pendingSync
+      // at all once a newer session has started — resetLocalStore() already
+      // reset both explicitly for the new generation, and by now they may
+      // correctly reflect a genuinely in-flight request of *its own*.
+      // Unconditionally clearing syncInFlight here would falsely "unlock"
+      // that request mid-flight, letting a second one for the same new
+      // session fire concurrently — exactly the same-account self-race this
+      // queue exists to prevent.
+      if (myGeneration !== generation) return;
       syncInFlight = false;
       notifyListeners();
       if (pendingSync) {
@@ -118,15 +138,21 @@ function runSync(): void {
 }
 
 export async function hydrateFromServer(instructorId: string): Promise<void> {
+  const myGeneration = ++generation;
   currentInstructorId = instructorId;
   try {
     const { blob, updatedAt } = await fetchData();
+    // A newer session (another hydrate, or a logout) has since taken over —
+    // this response belongs to a session that's no longer active, so drop it
+    // rather than resurrecting its data (and instructorId) as if it were current.
+    if (myGeneration !== generation) return;
     db = normalizeDatabase(blob as Record<string, unknown>);
     lastKnownUpdatedAt = updatedAt;
     hydrated = true;
     syncStatus = 'synced';
     notifyListeners();
   } catch (err) {
+    if (myGeneration !== generation) return;
     // Offline fallback: fall back to this instructor's last-synced local
     // cache rather than blocking entirely, but only for a genuine network
     // failure — an auth error means the cache may belong to a session that's
@@ -212,9 +238,15 @@ async function migratePhotosToServer(source: Database): Promise<Database> {
 // real success/failure result and only mark the legacy data claimed once
 // it's actually confirmed saved on the server.
 export async function importLegacyDatabase(legacy: Database): Promise<void> {
+  const myGeneration = generation;
   const migrated = await migratePhotosToServer(legacy);
   const expectedUpdatedAt = lastKnownUpdatedAt ?? undefined;
   const { updatedAt } = await putData(migrated, expectedUpdatedAt);
+  // The session this import was started for is no longer active (e.g. the
+  // user logged out mid-upload) — the data landed on the server under that
+  // session's account, but applying it to *this* generation's local state
+  // would show one account's just-imported data under a different one.
+  if (myGeneration !== generation) return;
   db = migrated;
   lastKnownUpdatedAt = updatedAt;
   syncStatus = 'synced';
@@ -224,11 +256,20 @@ export async function importLegacyDatabase(legacy: Database): Promise<void> {
 }
 
 export function resetLocalStore(): void {
+  generation++;
   db = emptyDatabase();
   currentInstructorId = null;
   hydrated = false;
   lastKnownUpdatedAt = null;
   syncStatus = 'idle';
+  // A PUT belonging to the session being closed may still be in flight (its
+  // completion handlers are now moot — see the generation check in
+  // runSync()'s .finally()). Declaring the queue empty here, rather than
+  // leaving it to that request's own cleanup, means the next session starts
+  // with a genuinely clean slate instead of possibly waiting on (or being
+  // silently gated behind) a request nobody cares about anymore.
+  syncInFlight = false;
+  pendingSync = false;
   notifyListeners();
 }
 

@@ -39,10 +39,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const { method = 'GET', body, auth = true } = options;
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  if (auth) {
-    const token = getToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-  }
+  const requestToken = auth ? getToken() : null;
+  if (requestToken) headers.Authorization = `Bearer ${requestToken}`;
 
   let response: Response;
   try {
@@ -58,10 +56,17 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   // A 401 only means "your session expired" for a request that actually sent
   // one — the login/create-account endpoints (auth: false) also return 401
   // for a plain wrong passcode, which is a normal error to show verbatim,
-  // not a session to clear.
+  // not a session to clear. It also only means *this browser tab's active
+  // session* expired if the token that got rejected is still the current
+  // one — a slow request from a session the user has since logged out of
+  // (or switched away from) can resolve with a 401 well after a different
+  // session has logged in, and must not be allowed to log that new session
+  // out too.
   if (auth && response.status === 401) {
-    clearToken();
-    unauthorizedHandler?.();
+    if (getToken() === requestToken) {
+      clearToken();
+      unauthorizedHandler?.();
+    }
     throw new ApiError('Your session expired — please log in again.', 401);
   }
 
@@ -123,9 +128,13 @@ export async function uploadPhoto(blob: Blob): Promise<{ url: string; key: strin
     throw new ApiError('Could not reach the server. Check your connection.', 0);
   }
 
+  // See request()'s matching comment: only clear the session if the token
+  // that got rejected is still the one currently active.
   if (response.status === 401) {
-    clearToken();
-    unauthorizedHandler?.();
+    if (getToken() === token) {
+      clearToken();
+      unauthorizedHandler?.();
+    }
     throw new ApiError('Your session expired — please log in again.', 401);
   }
   if (!response.ok) {
