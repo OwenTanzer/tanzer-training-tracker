@@ -1,5 +1,19 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+// Vite inlines env vars at build time, so a build that forgot to set this
+// (a local dev server with no .env.local, or a deploy workflow missing the
+// env var) would otherwise silently construct requests like
+// "undefined/api/data" — same-origin, so they 404 in a confusing way instead
+// of failing obviously. Fail loudly and immediately instead: this throws
+// during module evaluation, before the app ever renders.
+if (!API_BASE_URL) {
+  const message =
+    'VITE_API_BASE_URL is not set — the app has no API to talk to. Set it in ' +
+    '.env.local for local dev, or as a build-time env var in deploy.yml for production.';
+  console.error(message);
+  throw new Error(message);
+}
+
 const TOKEN_KEY = 'abbys-dog-chej:session-token';
 
 export function getToken(): string | null {
