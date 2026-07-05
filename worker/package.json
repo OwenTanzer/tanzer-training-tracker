@@ -1,0 +1,18 @@
+{
+  "name": "abbys-dog-chej-worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "db:migrate:local": "wrangler d1 execute abbys-dog-chej --local --file=./schema.sql",
+    "db:migrate:remote": "wrangler d1 execute abbys-dog-chej --remote --file=./schema.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "typescript": "~6.0.2",
+    "wrangler": "^4.0.0"
+  }
+}
