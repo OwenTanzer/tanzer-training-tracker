@@ -2,12 +2,10 @@ name = "abbys-dog-chej-api"
 main = "src/index.ts"
 compatibility_date = "2026-07-01"
 
-# TODO: replace with the real ID once the D1 database is provisioned
-# (`wrangler d1 create abbys-dog-chej` or the Cloudflare D1 MCP tools).
 [[d1_databases]]
 binding = "DB"
 database_name = "abbys-dog-chej"
-database_id = "REPLACE_WITH_REAL_D1_DATABASE_ID"
+database_id = "d7c4c057-440e-4daa-a738-2d7b3aace4a0"
 
 [[r2_buckets]]
 binding = "PHOTOS"
