@@ -1,0 +1,135 @@
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+
+const TOKEN_KEY = 'abbys-dog-chej:session-token';
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+// Registered by auth.ts so a 401 from anywhere can clear the session and
+// bounce to the Login screen, without every call site needing its own logic.
+let unauthorizedHandler: (() => void) | null = null;
+export function setUnauthorizedHandler(handler: () => void) {
+  unauthorizedHandler = handler;
+}
+
+interface RequestOptions {
+  method?: string;
+  body?: unknown;
+  auth?: boolean;
+}
+
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { method = 'GET', body, auth = true } = options;
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (auth) {
+    const token = getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new ApiError('Could not reach the server. Check your connection.', 0);
+  }
+
+  // A 401 only means "your session expired" for a request that actually sent
+  // one — the login/create-account endpoints (auth: false) also return 401
+  // for a plain wrong passcode, which is a normal error to show verbatim,
+  // not a session to clear.
+  if (auth && response.status === 401) {
+    clearToken();
+    unauthorizedHandler?.();
+    throw new ApiError('Your session expired — please log in again.', 401);
+  }
+
+  if (!response.ok) {
+    let message = `Request failed (${response.status})`;
+    try {
+      const data = (await response.json()) as { error?: string };
+      if (data.error) message = data.error;
+    } catch {
+      // fall back to the generic message above
+    }
+    throw new ApiError(message, response.status);
+  }
+
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
+}
+
+export interface AccountResponse {
+  token: string;
+  instructorId: string;
+  name: string;
+}
+
+export function createInstructor(name: string, passcode: string): Promise<AccountResponse> {
+  return request('/api/instructors', { method: 'POST', body: { name, passcode }, auth: false });
+}
+
+export function login(name: string, passcode: string): Promise<AccountResponse> {
+  return request('/api/login', { method: 'POST', body: { name, passcode }, auth: false });
+}
+
+export function logout(): Promise<{ ok: boolean }> {
+  return request('/api/login', { method: 'DELETE' });
+}
+
+export interface DataResponse {
+  blob: unknown;
+  updatedAt: string;
+}
+
+export function fetchData(): Promise<DataResponse> {
+  return request('/api/data');
+}
+
+export function putData(blob: unknown, expectedUpdatedAt?: string): Promise<{ updatedAt: string }> {
+  return request('/api/data', { method: 'PUT', body: { blob, expectedUpdatedAt } });
+}
+
+export async function uploadPhoto(blob: Blob): Promise<{ url: string; key: string }> {
+  const token = getToken();
+  const headers: Record<string, string> = { 'Content-Type': blob.type || 'image/jpeg' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/photos`, { method: 'POST', headers, body: blob });
+  } catch {
+    throw new ApiError('Could not reach the server. Check your connection.', 0);
+  }
+
+  if (response.status === 401) {
+    clearToken();
+    unauthorizedHandler?.();
+    throw new ApiError('Your session expired — please log in again.', 401);
+  }
+  if (!response.ok) {
+    throw new ApiError(`Photo upload failed (${response.status})`, response.status);
+  }
+  return response.json();
+}

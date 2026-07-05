@@ -25,7 +25,7 @@ export interface Database {
 
 const STORAGE_KEY = 'abbys-dog-chej:db:v1';
 
-function emptyDatabase(): Database {
+export function emptyDatabase(): Database {
   return {
     folders: [],
     dogs: [],
@@ -144,7 +144,7 @@ function backfillCompletions(completions: DogChecklistCompletion[]): DogChecklis
   }));
 }
 
-function normalizeDatabase(parsed: Record<string, unknown>): Database {
+export function normalizeDatabase(parsed: Record<string, unknown>): Database {
   if (
     Array.isArray(parsed.milestoneTemplates) &&
     Array.isArray(parsed.dogMilestoneCompletions)
@@ -175,10 +175,13 @@ function normalizeDatabase(parsed: Record<string, unknown>): Database {
         : buildDefaultMilestones(),
     dogMilestoneCompletions: migrated.dogMilestoneCompletions,
   };
-  saveDatabase(database);
   return database;
 }
 
+// Reads/writes the legacy single-browser key. normalizeDatabase itself is a
+// pure function (safe to reuse for server-fetched blobs too, e.g. from
+// store.ts) — this is the only place that persists an upgraded shape back to
+// that specific key, since it's the only caller that owns it.
 export function loadDatabase(): Database {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) {
@@ -187,7 +190,9 @@ export function loadDatabase(): Database {
     return db;
   }
   try {
-    return normalizeDatabase(JSON.parse(raw));
+    const db = normalizeDatabase(JSON.parse(raw));
+    saveDatabase(db);
+    return db;
   } catch {
     const db = emptyDatabase();
     saveDatabase(db);
@@ -198,6 +203,34 @@ export function loadDatabase(): Database {
 export function saveDatabase(db: Database): boolean {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Server-backed accounts cache their last-synced blob under a key scoped to
+// the instructor, completely separate from the legacy single-browser
+// STORAGE_KEY above — that key is reserved for Phase 4's "import this
+// browser's existing data" migration and must never be overwritten by the
+// server-backed code path, or the very data that migration needs to read
+// would be destroyed before it ships.
+function serverCacheKey(instructorId: string): string {
+  return `abbys-dog-chej:server-cache:${instructorId}`;
+}
+
+export function loadServerCache(instructorId: string): Database | null {
+  try {
+    const raw = localStorage.getItem(serverCacheKey(instructorId));
+    return raw ? normalizeDatabase(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveServerCache(instructorId: string, db: Database): boolean {
+  try {
+    localStorage.setItem(serverCacheKey(instructorId), JSON.stringify(db));
     return true;
   } catch {
     return false;

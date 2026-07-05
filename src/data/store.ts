@@ -11,11 +11,31 @@ import type {
   PhaseChecklistItem,
   TrainingReport,
 } from '../types';
-import { loadDatabase, saveDatabase, type Database } from './db';
+import {
+  emptyDatabase,
+  loadServerCache,
+  normalizeDatabase,
+  saveServerCache,
+  type Database,
+} from './db';
 import { logError, logEvent } from '../lib/diagnostics';
+import { ApiError, fetchData, putData } from '../lib/api';
 
-let db: Database = loadDatabase();
+let db: Database = emptyDatabase();
+let currentInstructorId: string | null = null;
+let hydrated = false;
+let lastKnownUpdatedAt: string | null = null;
+
+export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
+let syncStatus: SyncStatus = 'idle';
+let syncInFlight = false;
+let pendingSync = false;
+
 const listeners = new Set<() => void>();
+
+function notifyListeners() {
+  listeners.forEach((listener) => listener());
+}
 
 function notify(): boolean {
   // Store actions mutate nested arrays/objects in place for simplicity, but
@@ -23,15 +43,123 @@ function notify(): boolean {
   // without this shallow clone, React can skip re-rendering after a mutation
   // and the UI won't reflect the change until something else forces a render.
   db = { ...db };
-  const persisted = saveDatabase(db);
-  if (!persisted) {
-    logError(
-      'Local storage save failed',
-      'Browser storage is likely full. Try removing an old photo or report, then save again.',
-    );
+  let persistedLocally = true;
+  if (currentInstructorId) {
+    persistedLocally = saveServerCache(currentInstructorId, db);
+    if (!persistedLocally) {
+      logError(
+        'Local cache save failed',
+        'Browser storage is likely full. Try removing an old photo or report, then save again.',
+      );
+    }
   }
-  listeners.forEach((listener) => listener());
-  return persisted;
+  notifyListeners();
+  syncToServer();
+  return persistedLocally;
+}
+
+// The server holds one JSON blob per instructor. Rather than sending a PUT
+// per mutation (which would race against itself — two rapid edits could
+// send the same expectedUpdatedAt and the second would spuriously 409
+// against its own sibling, not a real cross-device conflict), in-flight
+// writes are serialized: at most one PUT runs at a time, and any mutation
+// that arrives while one is in flight just marks "there's newer state to
+// send" rather than firing a second concurrent request. When the in-flight
+// one finishes, the latest db/lastKnownUpdatedAt goes out next.
+function syncToServer(): void {
+  if (!hydrated) return;
+  if (syncInFlight) {
+    pendingSync = true;
+    return;
+  }
+  runSync();
+}
+
+function runSync(): void {
+  syncInFlight = true;
+  syncStatus = 'syncing';
+  notifyListeners();
+  const blobSnapshot = db;
+  const expectedUpdatedAt = lastKnownUpdatedAt ?? undefined;
+  putData(blobSnapshot, expectedUpdatedAt)
+    .then((res) => {
+      lastKnownUpdatedAt = res.updatedAt;
+      syncStatus = 'synced';
+    })
+    .catch((err: unknown) => {
+      syncStatus = 'error';
+      if (err instanceof ApiError && err.status === 409) {
+        logError(
+          'Changes not saved',
+          "Your data changed elsewhere (another tab or device) — reload the page before continuing so you don't lose recent changes.",
+        );
+      } else if (err instanceof ApiError && err.status === 401) {
+        logError('Signed out', 'Your session expired — log back in to keep syncing your changes.');
+      } else {
+        logError(
+          'Changes not synced yet',
+          'Could not reach the server. This change is saved on this device and will sync once back online.',
+        );
+      }
+    })
+    .finally(() => {
+      syncInFlight = false;
+      notifyListeners();
+      if (pendingSync) {
+        pendingSync = false;
+        runSync();
+      }
+    });
+}
+
+export async function hydrateFromServer(instructorId: string): Promise<void> {
+  currentInstructorId = instructorId;
+  try {
+    const { blob, updatedAt } = await fetchData();
+    db = normalizeDatabase(blob as Record<string, unknown>);
+    lastKnownUpdatedAt = updatedAt;
+    hydrated = true;
+    syncStatus = 'synced';
+    notifyListeners();
+  } catch (err) {
+    // Offline fallback: fall back to this instructor's last-synced local
+    // cache rather than blocking entirely, but only for a genuine network
+    // failure — an auth error means the cache may belong to a session that's
+    // no longer valid, so surface that instead of silently showing stale data.
+    if (err instanceof ApiError && err.status === 0) {
+      const cached = loadServerCache(instructorId);
+      if (cached) {
+        db = cached;
+        hydrated = true;
+        syncStatus = 'error';
+        logError('Showing offline copy', "Could not reach the server, so you're seeing this device's last synced copy.");
+        notifyListeners();
+        return;
+      }
+    }
+    throw err;
+  }
+}
+
+// A brand-new account's server blob has empty checklist/milestone arrays —
+// the Worker deliberately doesn't know the app's default templates, so the
+// client seeds them once here (the same defaults a fresh local install has
+// always gotten via emptyDatabase()), right after the first successful hydrate.
+export function seedDefaultTemplatesIfEmpty(): void {
+  if (db.checklistItems.length > 0 || db.milestoneTemplates.length > 0) return;
+  const defaults = emptyDatabase();
+  db = { ...db, checklistItems: defaults.checklistItems, milestoneTemplates: defaults.milestoneTemplates };
+  notifyListeners();
+  syncToServer();
+}
+
+export function resetLocalStore(): void {
+  db = emptyDatabase();
+  currentInstructorId = null;
+  hydrated = false;
+  lastKnownUpdatedAt = null;
+  syncStatus = 'idle';
+  notifyListeners();
 }
 
 function subscribe(listener: () => void) {
@@ -41,6 +169,14 @@ function subscribe(listener: () => void) {
 
 function useDatabase(): Database {
   return useSyncExternalStore(subscribe, () => db);
+}
+
+export function useHydrated(): boolean {
+  return useSyncExternalStore(subscribe, () => hydrated);
+}
+
+export function useSyncStatus(): SyncStatus {
+  return useSyncExternalStore(subscribe, () => syncStatus);
 }
 
 export interface DatabaseCounts {
