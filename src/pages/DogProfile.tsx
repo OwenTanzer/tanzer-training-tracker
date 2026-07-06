@@ -46,6 +46,11 @@ function EditReportForm({
   const [error, setError] = useState<string | null>(null);
   const skillsForPhase = useChecklistItems(phase);
 
+  function handlePhaseChange(next: Phase) {
+    setPhase(next);
+    setSkillIds([]);
+  }
+
   function toggleSkill(id: string) {
     setSkillIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
   }
@@ -73,7 +78,7 @@ function EditReportForm({
     <form onSubmit={handleSubmit} className="space-y-2 text-sm">
       <select
         value={phase}
-        onChange={(e) => setPhase(e.target.value as Phase)}
+        onChange={(e) => handlePhaseChange(e.target.value as Phase)}
         className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
       >
         {PHASES.map((p) => (
