@@ -291,3 +291,12 @@ export function isLegacyDataClaimed(): boolean {
 export function markLegacyDataClaimed(): void {
   localStorage.setItem(LEGACY_CLAIMED_KEY, 'true');
 }
+
+// The legacy blob embeds photos as base64 data: URLs (often multiple MB), so
+// it's typically the single largest thing in localStorage. Once it's no
+// longer reachable through the import prompt — imported, explicitly
+// declined, or superseded by an account that already has its own real data —
+// it's pure dead weight sitting between the device and its storage quota.
+export function clearLegacyDatabase(): void {
+  localStorage.removeItem(STORAGE_KEY);
+}
