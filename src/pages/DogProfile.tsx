@@ -38,12 +38,18 @@ function EditReportForm({
   onCancel: () => void;
   onSaved: () => void;
 }) {
+  const skillsForPhase = useChecklistItems(report.phase);
   const [redFlag, setRedFlag] = useState(report.redFlag);
   const [locationId, setLocationId] = useState(report.locationId ?? '');
   const [notes, setNotes] = useState(report.notes);
-  const [skillIds, setSkillIds] = useState<string[]>(report.skillIds);
+  // Filtered against this phase's skills at init — a report saved before phase
+  // was locked down (or otherwise corrupted) could carry skillIds from a
+  // different phase than its own, which would never show up as a checkbox
+  // here but would still round-trip back into storage on save otherwise.
+  const [skillIds, setSkillIds] = useState<string[]>(() =>
+    report.skillIds.filter((id) => skillsForPhase.some((item) => item.id === id)),
+  );
   const [error, setError] = useState<string | null>(null);
-  const skillsForPhase = useChecklistItems(report.phase);
 
   function toggleSkill(id: string) {
     setSkillIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
@@ -51,13 +57,14 @@ function EditReportForm({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const validSkillIds = skillIds.filter((id) => skillsForPhase.some((item) => item.id === id));
     const persisted = updateReport(report.id, {
       phase: report.phase,
       redFlag,
       locationId: locationId || null,
       notes,
       picture: report.picture,
-      skillIds,
+      skillIds: validSkillIds,
     });
     if (!persisted) {
       setError(
