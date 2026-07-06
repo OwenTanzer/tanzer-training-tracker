@@ -12,6 +12,7 @@ import type {
   TrainingReport,
 } from '../types';
 import {
+  clearLegacyDatabase,
   emptyDatabase,
   hasLegacyContent,
   isLegacyDataClaimed,
@@ -158,6 +159,7 @@ export async function hydrateFromServer(instructorId: string): Promise<void> {
     lastKnownUpdatedAt = updatedAt;
     hydrated = true;
     syncStatus = 'synced';
+    pruneUnreachableLegacyData();
     notifyListeners();
   } catch (err) {
     if (myGeneration !== generation) return;
@@ -178,6 +180,7 @@ export async function hydrateFromServer(instructorId: string): Promise<void> {
         lastKnownUpdatedAt = cached.updatedAt;
         hydrated = true;
         syncStatus = 'error';
+        pruneUnreachableLegacyData();
         logError('Showing offline copy', "Could not reach the server, so you're seeing this device's last synced copy.");
         notifyListeners();
         return;
@@ -223,7 +226,22 @@ export function getImportableLegacyDatabase(): Database | null {
 // touching this.
 export function declineLegacyImport(): void {
   markLegacyDataClaimed();
+  clearLegacyDatabase();
   notifyListeners();
+}
+
+// If this account already has its own real data, getImportableLegacyDatabase()
+// will never offer this device's pre-account blob for import (it only offers
+// import into an empty account) — so a device that reached "has legacy data"
+// and "already has a populated account" without ever explicitly importing or
+// declining (e.g. the account was populated on a different device, or before
+// this cleanup existed) would otherwise keep that now-unreachable blob
+// forever, quietly eating into the device's storage quota.
+function pruneUnreachableLegacyData(): void {
+  if (isLegacyDataClaimed()) return;
+  if (!hasLegacyContent(db)) return;
+  markLegacyDataClaimed();
+  clearLegacyDatabase();
 }
 
 // Reactive (unlike calling getImportableLegacyDatabase() directly in a render
@@ -286,6 +304,7 @@ export async function importLegacyDatabase(legacy: Database): Promise<void> {
   syncStatus = 'synced';
   if (currentInstructorId) saveServerCache(currentInstructorId, db, lastKnownUpdatedAt);
   markLegacyDataClaimed();
+  clearLegacyDatabase();
   notifyListeners();
 }
 
