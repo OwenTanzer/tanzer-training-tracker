@@ -174,7 +174,7 @@ function App() {
     <div className="min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
       <header className="border-b border-gray-200 dark:border-gray-700 p-4 flex items-center justify-between">
         <Link to="/" className="font-semibold">
-          🐕 Abby's Dog Notes
+          🐕 Tanzer Training Tracker
         </Link>
         <div className="flex items-center gap-4">
           <Link to="/templates" className="text-sm text-gray-500 hover:underline">

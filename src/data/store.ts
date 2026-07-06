@@ -686,6 +686,35 @@ export function toggleReportRedFlag(id: string): void {
   logEvent('Report red flag toggled', `report ${id} -> ${report.redFlag}`);
 }
 
+export interface UpdateReportInput {
+  phase: Phase;
+  redFlag: boolean;
+  locationId: string | null;
+  notes: string;
+  picture: string | null;
+  skillIds: string[];
+}
+
+export function updateReport(id: string, updates: UpdateReportInput): boolean {
+  const report = db.reports.find((r) => r.id === id);
+  if (!report) return false;
+  Object.assign(report, updates, { updatedDate: now() });
+  if (updates.locationId) {
+    const location = db.locations.find((l) => l.id === updates.locationId);
+    if (location) location.lastUsedDate = now();
+  }
+  markSkillsInProgress(report.dogId, updates.skillIds);
+  const persisted = notify();
+  logEvent('Report updated', id);
+  return persisted;
+}
+
+export function deleteReport(id: string): void {
+  db.reports = db.reports.filter((r) => r.id !== id);
+  notify();
+  logEvent('Report deleted', id);
+}
+
 // ---- Locations ----
 
 export function useLocations(): Location[] {

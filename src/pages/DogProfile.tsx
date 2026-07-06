@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MoveDialog } from '../components/MoveDialog';
-import { PencilIcon } from '../components/icons';
+import { PencilIcon, TrashIcon } from '../components/icons';
 import { PhotoCropDialog } from '../components/PhotoCropDialog';
 import { ProgressBar } from '../components/ProgressBar';
 import { uploadPhoto } from '../lib/api';
 import {
   deleteDog,
+  deleteReport,
   moveDog,
   reactivateDog,
   releaseDog,
@@ -14,6 +15,7 @@ import {
   toggleDogMilestoneCompletion,
   toggleReportRedFlag,
   updateDog,
+  updateReport,
   useChecklistItems,
   useDog,
   useDogCompletions,
@@ -23,7 +25,116 @@ import {
   useMilestoneTemplates,
   useReportsForDog,
 } from '../data/store';
-import { PHASES, type Phase } from '../types';
+import { PHASES, type Location, type Phase, type TrainingReport } from '../types';
+
+function EditReportForm({
+  report,
+  locations,
+  onCancel,
+  onSaved,
+}: {
+  report: TrainingReport;
+  locations: Location[];
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [phase, setPhase] = useState<Phase>(report.phase);
+  const [redFlag, setRedFlag] = useState(report.redFlag);
+  const [locationId, setLocationId] = useState(report.locationId ?? '');
+  const [notes, setNotes] = useState(report.notes);
+  const [skillIds, setSkillIds] = useState<string[]>(report.skillIds);
+  const [error, setError] = useState<string | null>(null);
+  const skillsForPhase = useChecklistItems(phase);
+
+  function toggleSkill(id: string) {
+    setSkillIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const persisted = updateReport(report.id, {
+      phase,
+      redFlag,
+      locationId: locationId || null,
+      notes,
+      picture: report.picture,
+      skillIds,
+    });
+    if (!persisted) {
+      setError(
+        "This report didn't save — your browser's storage is likely full. Try removing an old photo or report, then save again.",
+      );
+      return;
+    }
+    onSaved();
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-2 text-sm">
+      <select
+        value={phase}
+        onChange={(e) => setPhase(e.target.value as Phase)}
+        className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
+      >
+        {PHASES.map((p) => (
+          <option key={p} value={p}>
+            {p}
+          </option>
+        ))}
+      </select>
+      <div className="space-y-1">
+        {skillsForPhase.map((item) => (
+          <label key={item.id} className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={skillIds.includes(item.id)}
+              onChange={() => toggleSkill(item.id)}
+            />
+            {item.title}
+          </label>
+        ))}
+      </div>
+      <label className="flex items-center gap-2">
+        <input type="checkbox" checked={redFlag} onChange={(e) => setRedFlag(e.target.checked)} />
+        🚩 Red flag this report
+      </label>
+      <select
+        value={locationId}
+        onChange={(e) => setLocationId(e.target.value)}
+        className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
+      >
+        <option value="">No location</option>
+        {locations.map((l) => (
+          <option key={l.id} value={l.id}>
+            {l.name}
+          </option>
+        ))}
+      </select>
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        rows={4}
+        className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
+      />
+      {error && <p className="text-xs text-red-500">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          className="rounded-md bg-sky-500 px-3 py-1 font-medium text-white hover:bg-sky-600"
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1 hover:bg-gray-50 dark:hover:bg-gray-800"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
 
 export function DogProfile() {
   const { dogId } = useParams<{ dogId: string }>();
@@ -46,6 +157,7 @@ export function DogProfile() {
   const [selfName, setSelfName] = useState(dog?.name ?? '');
   const [moving, setMoving] = useState(false);
   const [pendingPhotoFile, setPendingPhotoFile] = useState<File | null>(null);
+  const [editingReportId, setEditingReportId] = useState<string | null>(null);
 
   const reports = useMemo(() => {
     return allReports.filter((r) => {
@@ -112,6 +224,11 @@ export function DogProfile() {
     if (!dog) return;
     if (!confirm(`Reactivate ${dog.name}? This removes the "released" marker.`)) return;
     reactivateDog(dog.id);
+  }
+
+  function handleDeleteReport(id: string) {
+    if (!confirm('Delete this training report? This cannot be undone.')) return;
+    deleteReport(id);
   }
 
   return (
@@ -370,6 +487,21 @@ export function DogProfile() {
         <ul className="space-y-2">
           {reports.map((r) => {
             const location = locations.find((l) => l.id === r.locationId);
+            if (editingReportId === r.id) {
+              return (
+                <li
+                  key={r.id}
+                  className="rounded-lg border border-sky-300 dark:border-sky-700 p-3"
+                >
+                  <EditReportForm
+                    report={r}
+                    locations={locations}
+                    onCancel={() => setEditingReportId(null)}
+                    onSaved={() => setEditingReportId(null)}
+                  />
+                </li>
+              );
+            }
             return (
               <li
                 key={r.id}
@@ -379,13 +511,29 @@ export function DogProfile() {
                   <span className="font-medium">
                     {r.phase} · {new Date(r.createdDate).toLocaleDateString()}
                   </span>
-                  <button
-                    onClick={() => toggleReportRedFlag(r.id)}
-                    className={r.redFlag ? 'text-red-500' : 'text-gray-300'}
-                    title="Toggle red flag"
-                  >
-                    🚩
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => toggleReportRedFlag(r.id)}
+                      className={r.redFlag ? 'text-red-500' : 'text-gray-300'}
+                      title="Toggle red flag"
+                    >
+                      🚩
+                    </button>
+                    <button
+                      onClick={() => setEditingReportId(r.id)}
+                      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                      title="Edit report"
+                    >
+                      <PencilIcon />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteReport(r.id)}
+                      className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950"
+                      title="Delete report"
+                    >
+                      <TrashIcon />
+                    </button>
+                  </div>
                 </div>
                 {location && (
                   <p className="text-xs text-gray-500">📍 {location.name}</p>

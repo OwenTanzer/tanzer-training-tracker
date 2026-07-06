@@ -1,4 +1,4 @@
-# Abby's Dog Notes
+# Tanzer Training Tracker
 
 A dog-training documentation app: organize dogs into folders, open a dog
 profile, log training reports, and track progress toward graduation.

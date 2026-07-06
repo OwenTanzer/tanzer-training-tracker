@@ -32,7 +32,7 @@ export function Login() {
         <div className="text-center space-y-1">
           <p className="text-3xl">🐕</p>
           <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-            Abby's Dog Notes
+            Tanzer Training Tracker
           </h1>
           <p className="text-sm text-gray-500">
             {mode === 'login' ? 'Log in as an instructor' : 'Create your instructor account'}

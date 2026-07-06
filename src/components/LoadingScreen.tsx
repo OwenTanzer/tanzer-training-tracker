@@ -25,7 +25,7 @@ export function LoadingScreen({ onFinish }: { onFinish: () => void }) {
         <span className="absolute bottom-2 right-3 h-10 w-0.5 bg-gray-300 dark:bg-gray-700" />
         <span className="absolute bottom-2 text-4xl animate-walk-to-curb">🐕‍🦺</span>
       </div>
-      <p className="text-sm text-gray-500 dark:text-gray-400">Abby's Dog Notes</p>
+      <p className="text-sm text-gray-500 dark:text-gray-400">Tanzer Training Tracker</p>
     </div>
   );
 }
