@@ -14,7 +14,11 @@ function RedFlaggedReport({ reportId }: { reportId: string }) {
         <Link to={dog ? `/dog/${dog.id}` : '#'} className="font-medium text-sky-500 hover:underline">
           {dog?.name ?? 'Unknown dog'}
         </Link>
-        <button onClick={() => toggleReportRedFlag(report.id)} className="text-red-500" title="Unflag">
+        <button
+          onClick={() => toggleReportRedFlag(report.id)}
+          title="Unflag"
+          className="flex h-7 w-7 items-center justify-center rounded-full bg-red-100 text-sm ring-1 ring-red-400 transition-all duration-150 active:scale-90 dark:bg-red-950"
+        >
           🚩
         </button>
       </div>

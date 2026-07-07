@@ -5,6 +5,7 @@ export interface Session {
   token: string;
   instructorId: string;
   name: string;
+  profilePhotoUrl: string | null;
 }
 
 const SESSION_KEY = 'abbys-dog-chej:session';
@@ -58,14 +59,35 @@ export function useSession(): Session | null {
 
 export async function login(name: string, passcode: string): Promise<void> {
   const res = await api.login(name, passcode);
-  session = { token: res.token, instructorId: res.instructorId, name: res.name };
+  session = {
+    token: res.token,
+    instructorId: res.instructorId,
+    name: res.name,
+    profilePhotoUrl: res.profilePhotoUrl,
+  };
   persistSession();
   notify();
 }
 
 export async function createAccount(name: string, passcode: string): Promise<void> {
   const res = await api.createInstructor(name, passcode);
-  session = { token: res.token, instructorId: res.instructorId, name: res.name };
+  session = {
+    token: res.token,
+    instructorId: res.instructorId,
+    name: res.name,
+    profilePhotoUrl: res.profilePhotoUrl,
+  };
+  persistSession();
+  notify();
+}
+
+export async function updateAccount(patch: {
+  name?: string;
+  profilePhotoKey?: string | null;
+}): Promise<void> {
+  const res = await api.updateAccount(patch);
+  if (!session) return;
+  session = { ...session, name: res.name, profilePhotoUrl: res.profilePhotoUrl };
   persistSession();
   notify();
 }

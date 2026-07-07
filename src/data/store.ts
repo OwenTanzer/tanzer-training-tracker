@@ -23,6 +23,8 @@ import {
   saveServerCache,
   type Database,
 } from './db';
+import { buildDefaultChecklist } from './defaultChecklist';
+import { buildDefaultMilestones } from './defaultMilestones';
 import { logError, logEvent } from '../lib/diagnostics';
 import { ApiError, fetchData, putData, uploadPhoto } from '../lib/api';
 import { dataUrlToBlob } from '../lib/compressImage';
@@ -197,7 +199,64 @@ export async function hydrateFromServer(instructorId: string): Promise<void> {
 export function seedDefaultTemplatesIfEmpty(): void {
   if (db.checklistItems.length > 0 || db.milestoneTemplates.length > 0) return;
   const defaults = emptyDatabase();
-  db = { ...db, checklistItems: defaults.checklistItems, milestoneTemplates: defaults.milestoneTemplates };
+  db = {
+    ...db,
+    checklistItems: defaults.checklistItems,
+    milestoneTemplates: defaults.milestoneTemplates,
+    templatesMigratedToAbbyDefaults: true,
+  };
+  notifyListeners();
+  syncToServer();
+}
+
+function checklistContentSignature(items: PhaseChecklistItem[]): string[] {
+  return items
+    .map((i) => `${i.phase}::${i.title}::${i.description}::${i.requiredForGraduation}::${i.sortOrder}`)
+    .sort();
+}
+
+function milestoneContentSignature(items: MilestoneTemplate[]): string[] {
+  return items.map((i) => `${i.phase}::${i.title}::${i.sortOrder}`).sort();
+}
+
+function sameSignature(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, idx) => v === b[idx]);
+}
+
+// One-time migration (#30): every account that predates Abby's real,
+// field-tested checklist/milestones gets upgraded to them, replacing whatever
+// AI-generated placeholder content (edited or not) it currently has. This is
+// intentionally unconditional — unlike an earlier version of this migration,
+// it no longer skips accounts just because a title or description was edited.
+//
+// Guarded by db.templatesMigratedToAbbyDefaults so it only ever runs once per
+// account: after it fires (or after seedDefaultTemplatesIfEmpty seeds a brand
+// new account directly from Abby's defaults), any edits the trainer makes are
+// permanent and never re-clobbered on a later login.
+//
+// Known tradeoff: checklist/milestone completions are keyed by item ID, and
+// Abby's curriculum has no equivalent mapping from the old placeholder items,
+// so any completions already recorded against the pre-migration items are
+// orphaned (they stop rendering as checked off) once this runs. Accepted
+// deliberately — see #30.
+export function migrateLegacyDefaultTemplates(): void {
+  if (db.templatesMigratedToAbbyDefaults) return;
+  if (db.checklistItems.length === 0 && db.milestoneTemplates.length === 0) return; // handled by seed path above
+
+  const targetChecklist = buildDefaultChecklist();
+  const targetMilestones = buildDefaultMilestones();
+  const alreadyCurrent =
+    sameSignature(checklistContentSignature(db.checklistItems), checklistContentSignature(targetChecklist)) &&
+    sameSignature(milestoneContentSignature(db.milestoneTemplates), milestoneContentSignature(targetMilestones));
+
+  db = alreadyCurrent
+    ? { ...db, templatesMigratedToAbbyDefaults: true }
+    : {
+        ...db,
+        checklistItems: targetChecklist,
+        milestoneTemplates: targetMilestones,
+        templatesMigratedToAbbyDefaults: true,
+      };
   notifyListeners();
   syncToServer();
 }

@@ -90,7 +90,7 @@ export function FolderView() {
       ) : (
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
-            {folder ? folder.name : 'All Folders'}
+            {folder ? folder.name : 'My Folders'}
           </h1>
           {folder && (
             <div className="flex gap-0.5">

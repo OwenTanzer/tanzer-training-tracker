@@ -103,6 +103,7 @@ export interface AccountResponse {
   token: string;
   instructorId: string;
   name: string;
+  profilePhotoUrl: string | null;
 }
 
 export function createInstructor(name: string, passcode: string): Promise<AccountResponse> {
@@ -115,6 +116,19 @@ export function login(name: string, passcode: string): Promise<AccountResponse> 
 
 export function logout(): Promise<{ ok: boolean }> {
   return request('/api/login', { method: 'DELETE' });
+}
+
+export interface AccountUpdateResponse {
+  instructorId: string;
+  name: string;
+  profilePhotoUrl: string | null;
+}
+
+export function updateAccount(patch: {
+  name?: string;
+  profilePhotoKey?: string | null;
+}): Promise<AccountUpdateResponse> {
+  return request('/api/account', { method: 'PATCH', body: patch });
 }
 
 export interface DataResponse {

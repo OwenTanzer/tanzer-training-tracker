@@ -29,11 +29,17 @@ function corsHeaders(request: Request, env: Env): HeadersInit {
   const origin = allowedOrigin(request, env);
   return {
     'Access-Control-Allow-Origin': origin ?? 'null',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };
+}
+
+function photoUrlForKey(request: Request, key: string | null | undefined): string | null {
+  if (!key) return null;
+  const url = new URL(request.url);
+  return `${url.protocol}//${url.host}/api/photos/${key}`;
 }
 
 function json(request: Request, env: Env, data: unknown, status = 200): Response {
@@ -98,7 +104,7 @@ async function handleCreateInstructor(request: Request, env: Env): Promise<Respo
     .bind(token, id, now, sessionExpiry())
     .run();
 
-  return json(request, env, { token, instructorId: id, name, updatedAt: now }, 201);
+  return json(request, env, { token, instructorId: id, name, profilePhotoUrl: null, updatedAt: now }, 201);
 }
 
 async function handleLogin(request: Request, env: Env): Promise<Response> {
@@ -108,10 +114,10 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
   if (!name || !passcode) return errorResponse(request, env, 'name and passcode are required', 400);
 
   const instructor = await env.DB.prepare(
-    'SELECT id, passcode_hash, passcode_salt FROM instructors WHERE name = ? COLLATE NOCASE',
+    'SELECT id, passcode_hash, passcode_salt, profile_photo_key FROM instructors WHERE name = ? COLLATE NOCASE',
   )
     .bind(name)
-    .first<{ id: string; passcode_hash: string; passcode_salt: string }>();
+    .first<{ id: string; passcode_hash: string; passcode_salt: string; profile_photo_key: string | null }>();
   if (!instructor) return errorResponse(request, env, 'Instructor not found', 404);
 
   const valid = await verifyPasscode(passcode, instructor.passcode_salt, instructor.passcode_hash);
@@ -125,7 +131,17 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
     .bind(token, instructor.id, now, sessionExpiry())
     .run();
 
-  return json(request, env, { token, instructorId: instructor.id, name }, 200);
+  return json(
+    request,
+    env,
+    {
+      token,
+      instructorId: instructor.id,
+      name,
+      profilePhotoUrl: photoUrlForKey(request, instructor.profile_photo_key),
+    },
+    200,
+  );
 }
 
 async function handleLogout(request: Request, env: Env): Promise<Response> {
@@ -192,9 +208,60 @@ async function handleUploadPhoto(request: Request, env: Env): Promise<Response> 
   const key = `instructors/${auth}/${generateId()}.jpg`;
   await env.PHOTOS.put(key, body, { httpMetadata: { contentType } });
 
-  const url = new URL(request.url);
-  const photoUrl = `${url.protocol}//${url.host}/api/photos/${key}`;
-  return json(request, env, { url: photoUrl, key }, 201);
+  return json(request, env, { url: photoUrlForKey(request, key), key }, 201);
+}
+
+async function handleUpdateAccount(request: Request, env: Env): Promise<Response> {
+  const auth = await requireAuth(request, env);
+  if (auth instanceof Response) return auth;
+
+  const body = await request.json<{ name?: string; profilePhotoKey?: string | null }>();
+  const updates: string[] = [];
+  const values: unknown[] = [];
+
+  if (body.name !== undefined) {
+    const name = body.name.trim();
+    if (!name) return errorResponse(request, env, 'name cannot be empty', 400);
+    const existing = await env.DB.prepare(
+      'SELECT id FROM instructors WHERE name = ? COLLATE NOCASE AND id != ?',
+    )
+      .bind(name, auth)
+      .first();
+    if (existing) return errorResponse(request, env, 'That name is already taken', 409);
+    updates.push('name = ?');
+    values.push(name);
+  }
+
+  if (body.profilePhotoKey !== undefined) {
+    const key = body.profilePhotoKey;
+    if (key !== null) {
+      if (!key.startsWith(`instructors/${auth}/`)) {
+        return errorResponse(request, env, 'profilePhotoKey does not belong to this instructor', 403);
+      }
+      const object = await env.PHOTOS.head(key);
+      if (!object) return errorResponse(request, env, 'profilePhotoKey does not exist', 400);
+    }
+    updates.push('profile_photo_key = ?');
+    values.push(key);
+  }
+
+  if (updates.length === 0) return errorResponse(request, env, 'Nothing to update', 400);
+
+  await env.DB.prepare(`UPDATE instructors SET ${updates.join(', ')} WHERE id = ?`)
+    .bind(...values, auth)
+    .run();
+
+  const row = await env.DB.prepare('SELECT name, profile_photo_key FROM instructors WHERE id = ?')
+    .bind(auth)
+    .first<{ name: string; profile_photo_key: string | null }>();
+  if (!row) return errorResponse(request, env, 'Instructor not found', 404);
+
+  return json(
+    request,
+    env,
+    { instructorId: auth, name: row.name, profilePhotoUrl: photoUrlForKey(request, row.profile_photo_key) },
+    200,
+  );
 }
 
 async function handleGetPhoto(request: Request, env: Env, key: string): Promise<Response> {
@@ -246,6 +313,9 @@ export default {
       }
       if (pathname === '/api/photos' && method === 'POST') {
         return await handleUploadPhoto(request, env);
+      }
+      if (pathname === '/api/account' && method === 'PATCH') {
+        return await handleUpdateAccount(request, env);
       }
       if (pathname.startsWith('/api/photos/') && method === 'GET') {
         return await handleGetPhoto(request, env, pathname.slice('/api/photos/'.length));
