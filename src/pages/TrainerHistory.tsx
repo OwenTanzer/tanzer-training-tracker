@@ -1,17 +1,42 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useTrainerHistoryStats } from '../data/store';
+import { useTrainerHistoryStats, type FinalOutcomeCounts, type SuccessRate } from '../data/store';
 import { useSession } from '../lib/auth';
 
-function StatTile({ icon, label, value }: { icon: string; label: string; value: number }) {
-  return (
-    <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+function StatTile({
+  icon,
+  label,
+  value,
+  onClick,
+}: {
+  icon: string;
+  label: string;
+  value: number;
+  onClick?: () => void;
+}) {
+  const content = (
+    <>
       <p className="text-xl">{icon}</p>
       <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100">
         {value.toLocaleString()}
       </p>
       <p className="text-xs text-gray-500">{label}</p>
-    </div>
+    </>
   );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 text-left hover:border-sky-400"
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">{content}</div>;
 }
 
 function formatLastWorked(dateIso: string | null): string {
@@ -30,13 +55,71 @@ function formatTrainerSince(createdAt: string | undefined): string | null {
   return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
+function SuccessRateCard({ rate }: { rate: SuccessRate }) {
+  return (
+    <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+      <p className="text-3xl font-semibold text-gray-900 dark:text-gray-100">
+        {rate.percent === null ? '—' : `${rate.percent}%`}
+      </p>
+      <p className="text-xs text-gray-500">
+        {rate.graduated + rate.released === 0
+          ? 'No graduated or released dogs yet'
+          : `${rate.graduated} graduated · ${rate.released} released`}
+      </p>
+    </div>
+  );
+}
+
+// Part-to-whole across 3 categories reads more precisely as a segmented bar
+// than a pie — same status colors (emerald/amber/red) already used
+// everywhere else in the app (ProgressBar, released markers, flags).
+function FinalOutcomeBar({ counts }: { counts: FinalOutcomeCounts }) {
+  if (counts.total === 0) {
+    return (
+      <p className="text-sm text-gray-400">No final outcome decisions recorded yet.</p>
+    );
+  }
+  const segments: { label: string; count: number; color: string }[] = [
+    { label: 'Placement Ready', count: counts.placementReady, color: 'bg-emerald-500' },
+    { label: 'Additional Objectives', count: counts.additionalObjectives, color: 'bg-amber-400' },
+    { label: 'Fail', count: counts.fail, color: 'bg-red-500' },
+  ];
+  return (
+    <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+      <div className="flex h-4 w-full gap-[2px] overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+        {segments
+          .filter((s) => s.count > 0)
+          .map((s) => (
+            <div
+              key={s.label}
+              className={`h-full ${s.color}`}
+              style={{ width: `${(s.count / counts.total) * 100}%` }}
+              title={`${s.label}: ${s.count} (${Math.round((s.count / counts.total) * 100)}%)`}
+            />
+          ))}
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+        {segments.map((s) => (
+          <span key={s.label} className="flex items-center gap-1.5">
+            <span className={`h-2 w-2 rounded-full ${s.color}`} />
+            {s.label}: {s.count} ({Math.round((s.count / counts.total) * 100)}%)
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function TrainerHistory() {
   const stats = useTrainerHistoryStats();
   const session = useSession();
+  const [refinedRate, setRefinedRate] = useState(false);
+  const [showGraduatedList, setShowGraduatedList] = useState(false);
 
   if (!session) return null;
 
   const trainerSince = formatTrainerSince(session.createdAt);
+  const activeSuccessRate = refinedRate ? stats.successRateRefined : stats.successRateOverall;
 
   return (
     <div className="max-w-3xl mx-auto p-4 space-y-6">
@@ -79,9 +162,36 @@ export function TrainerHistory() {
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <StatTile icon="🐕" label="Total dogs handled" value={stats.totalDogs} />
           <StatTile icon="🐾" label="Active dogs" value={stats.activeDogs} />
-          <StatTile icon="🎓" label="Graduated" value={stats.graduatedDogs} />
+          <StatTile
+            icon="🎓"
+            label="Graduated (tap for list)"
+            value={stats.graduatedDogs}
+            onClick={() => setShowGraduatedList((v) => !v)}
+          />
           <StatTile icon="👋" label="Released" value={stats.releasedDogs} />
         </div>
+        {showGraduatedList && (
+          <ul className="space-y-1">
+            {stats.graduatedDogsList.length === 0 && (
+              <p className="text-sm text-gray-400">No graduated dogs yet.</p>
+            )}
+            {stats.graduatedDogsList.map((dog) => (
+              <li key={dog.id}>
+                <Link
+                  to={`/dog/${dog.id}`}
+                  className="flex items-center justify-between rounded-xl border border-emerald-200 dark:border-emerald-900 p-3 text-sm hover:border-emerald-400"
+                >
+                  <span className="font-medium text-gray-900 dark:text-gray-100">{dog.name}</span>
+                  <span className="text-xs text-emerald-600 dark:text-emerald-400">
+                    {dog.graduatedDate
+                      ? `Graduated ${new Date(dog.graduatedDate).toLocaleDateString()}`
+                      : 'Graduated'}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="space-y-2">
@@ -98,12 +208,51 @@ export function TrainerHistory() {
       </section>
 
       <section className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
+            Success Rate
+          </h2>
+          <div className="flex gap-1 text-xs">
+            <button
+              type="button"
+              onClick={() => setRefinedRate(false)}
+              className={
+                !refinedRate
+                  ? 'rounded-md bg-sky-500 px-2 py-1 font-medium text-white'
+                  : 'rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800'
+              }
+            >
+              Overall
+            </button>
+            <button
+              type="button"
+              onClick={() => setRefinedRate(true)}
+              title="Omits dogs marked Excluded from Stats (pass-backs, health releases, etc.)"
+              className={
+                refinedRate
+                  ? 'rounded-md bg-sky-500 px-2 py-1 font-medium text-white'
+                  : 'rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800'
+              }
+            >
+              Refined
+            </button>
+          </div>
+        </div>
+        <SuccessRateCard rate={activeSuccessRate} />
+        <p className="text-xs text-gray-400">
+          Graduated ÷ (graduated + released). Dogs still in progress aren't counted either way.
+          {refinedRate && ' Refined omits dogs marked "Excluded from Stats."'}
+        </p>
+      </section>
+
+      <section className="space-y-2">
         <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
-          Success rate
+          Final Evaluation Outcomes
         </h2>
-        <p className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-500">
-          Coming soon — this depends on pass-back and configurable milestone outcome work that
-          hasn't landed yet.
+        <FinalOutcomeBar counts={stats.finalOutcomeCounts} />
+        <p className="text-xs text-gray-400">
+          From the milestone flagged as the final outcome (e.g. Advanced Final Blindfold) in
+          Manage Training Options.
         </p>
       </section>
 

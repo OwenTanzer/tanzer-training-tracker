@@ -13,8 +13,10 @@ import {
   reactivateDog,
   releaseDog,
   removeDogGraduatedStatus,
+  setMilestoneOutcome,
   toggleChecklistCompletion,
   toggleChecklistItemFlag,
+  toggleDogExcludedFromStats,
   toggleDogMilestoneCompletion,
   toggleReportRedFlag,
   updateDog,
@@ -34,13 +36,27 @@ import {
 } from '../data/store';
 import {
   DISTRACTION_SEVERITIES,
+  FINAL_OUTCOMES,
   PHASES,
   type DistractionSeverity,
   type DistractionTemplate,
+  type FinalOutcome,
   type Location,
   type Phase,
   type TrainingReport,
 } from '../types';
+
+const OUTCOME_STYLES: Record<FinalOutcome, string> = {
+  'Placement Ready': 'text-emerald-600 dark:text-emerald-400',
+  'Additional Objectives': 'text-amber-600 dark:text-amber-400',
+  Fail: 'text-red-500',
+};
+
+const OUTCOME_ICONS: Record<FinalOutcome, string> = {
+  'Placement Ready': '🟢',
+  'Additional Objectives': '🟡',
+  Fail: '🔴',
+};
 
 function EditReportForm({
   report,
@@ -354,6 +370,20 @@ export function DogProfile() {
     deleteReport(id);
   }
 
+  function handleMilestoneOutcomeChange(milestoneId: string, value: string) {
+    if (!dog) return;
+    const outcome = (value || null) as FinalOutcome | null;
+    if (
+      outcome === 'Fail' &&
+      !confirm(
+        `Mark ${dog.name} as Failed on this evaluation? This automatically releases them from training.`,
+      )
+    ) {
+      return;
+    }
+    setMilestoneOutcome(dog.id, milestoneId, outcome);
+  }
+
   return (
     <div className="max-w-3xl mx-auto p-4 space-y-6">
       <Link
@@ -408,6 +438,14 @@ export function DogProfile() {
                   className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
                 >
                   Worked today
+                </span>
+              )}
+              {dog.excludedFromStats && (
+                <span
+                  title="This dog is omitted from Trainer History's refined success rate"
+                  className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+                >
+                  Excluded from stats
                 </span>
               )}
             </div>
@@ -505,6 +543,21 @@ export function DogProfile() {
             🎓 Mark Graduated
           </button>
         )}
+        <button
+          onClick={() => toggleDogExcludedFromStats(dog.id)}
+          title={
+            dog.excludedFromStats
+              ? 'Include this dog in Trainer History success-rate stats again'
+              : "Omit this dog (e.g. a pass-back, or released for health) from Trainer History's refined success rate"
+          }
+          className={`rounded-md border px-3 py-1.5 text-sm font-medium ${
+            dog.excludedFromStats
+              ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-400'
+              : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
+          }`}
+        >
+          {dog.excludedFromStats ? '📊 Excluded from Stats' : '📊 Exclude from Stats'}
+        </button>
         <button
           onClick={handleDeleteDog}
           className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
@@ -608,6 +661,44 @@ export function DogProfile() {
         <ul className="space-y-1">
           {milestones.map((m) => {
             const completion = milestoneCompletions.find((c) => c.milestoneTemplateId === m.id);
+            if (m.isFinalOutcomeMilestone) {
+              return (
+                <li
+                  key={m.id}
+                  className="rounded-lg border border-gray-200 dark:border-gray-700 p-2 space-y-1.5"
+                >
+                  <div className="flex items-center justify-between gap-2 text-sm">
+                    <span className="font-medium text-gray-800 dark:text-gray-200">
+                      {m.title}
+                    </span>
+                    {(milestoneSessionCounts[m.id] ?? 0) > 0 && (
+                      <span className="text-xs text-gray-400">
+                        Worked {milestoneSessionCounts[m.id]}×
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <select
+                      value={completion?.outcome ?? ''}
+                      onChange={(e) => handleMilestoneOutcomeChange(m.id, e.target.value)}
+                      className="rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
+                    >
+                      <option value="">No decision yet</option>
+                      {FINAL_OUTCOMES.map((outcome) => (
+                        <option key={outcome} value={outcome}>
+                          {outcome}
+                        </option>
+                      ))}
+                    </select>
+                    {completion?.outcome && (
+                      <span className={`text-xs font-medium ${OUTCOME_STYLES[completion.outcome]}`}>
+                        {OUTCOME_ICONS[completion.outcome]} {completion.outcome}
+                      </span>
+                    )}
+                  </div>
+                </li>
+              );
+            }
             return (
               <li key={m.id}>
                 <label className="flex items-center gap-2 text-sm">

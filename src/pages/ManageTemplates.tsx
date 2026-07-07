@@ -14,6 +14,7 @@ import {
   reorderChecklistItems,
   reorderDistractionTemplates,
   reorderMilestoneTemplates,
+  toggleMilestoneFinalOutcomeFlag,
   useChecklistItems,
   useDistractionTemplates,
   useMilestoneTemplates,
@@ -67,15 +68,40 @@ export function ManageTemplates() {
         onReorder={(orderedIds) => reorderChecklistItems(phase, orderedIds)}
       />
 
-      <TemplateListEditor
-        label={`${phase} Milestones`}
-        addPlaceholder="New milestone"
-        items={milestones}
-        onAdd={(title) => createMilestoneTemplate(phase, title)}
-        onRename={renameMilestoneTemplate}
-        onDelete={deleteMilestoneTemplate}
-        onReorder={(orderedIds) => reorderMilestoneTemplates(phase, orderedIds)}
-      />
+      <div>
+        <TemplateListEditor
+          label={`${phase} Milestones`}
+          addPlaceholder="New milestone"
+          items={milestones}
+          onAdd={(title) => createMilestoneTemplate(phase, title)}
+          onRename={renameMilestoneTemplate}
+          onDelete={deleteMilestoneTemplate}
+          onReorder={(orderedIds) => reorderMilestoneTemplates(phase, orderedIds)}
+          renderExtra={(item) => (
+            <button
+              type="button"
+              title={
+                item.isFinalOutcomeMilestone
+                  ? 'This is the final outcome milestone — click to unmark it'
+                  : 'Mark as the final outcome milestone (e.g. Advanced Final Blindfold): dog profiles get a Placement Ready / Additional Objectives / Fail picker for it instead of a plain checkbox'
+              }
+              onClick={() => toggleMilestoneFinalOutcomeFlag(item.id)}
+              className={`shrink-0 rounded-md border px-2 py-1 text-xs font-medium ${
+                item.isFinalOutcomeMilestone
+                  ? 'border-sky-300 bg-sky-50 text-sky-600 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-400'
+                  : 'border-gray-300 text-gray-500 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800'
+              }`}
+            >
+              🎯 Final outcome
+            </button>
+          )}
+        />
+        <p className="text-xs text-gray-400">
+          Flag one milestone (e.g. "Advanced Final Blindfold") as the final outcome — dog
+          profiles get a Placement Ready / Additional Objectives / Fail picker for it instead of
+          a plain checkbox, and Trainer History summarizes the results.
+        </p>
+      </div>
 
       <div>
         <TemplateListEditor

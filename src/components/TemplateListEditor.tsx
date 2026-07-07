@@ -61,7 +61,7 @@ function DragHandle({ gesture }: { gesture: RowGesture }) {
   );
 }
 
-export function TemplateListEditor({
+export function TemplateListEditor<T extends TemplateListItem>({
   label,
   addPlaceholder,
   items,
@@ -69,14 +69,19 @@ export function TemplateListEditor({
   onRename,
   onDelete,
   onReorder,
+  renderExtra,
 }: {
   label: string;
   addPlaceholder: string;
-  items: TemplateListItem[];
+  items: T[];
   onAdd: (title: string) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
   onReorder: (orderedIds: string[]) => void;
+  // Optional per-row content rendered before the rename/delete buttons —
+  // e.g. the "final outcome milestone" flag toggle, which only milestones
+  // have. Skills/distractions simply don't pass this.
+  renderExtra?: (item: T) => React.ReactNode;
 }) {
   const [newTitle, setNewTitle] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -140,6 +145,7 @@ export function TemplateListEditor({
                 {item.title}
               </span>
             )}
+            {renderExtra?.(item)}
             <button
               title="Rename"
               onClick={() => startEditing(item)}

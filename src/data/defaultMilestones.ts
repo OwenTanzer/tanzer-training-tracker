@@ -39,6 +39,10 @@ export function buildDefaultMilestones(): MilestoneTemplate[] {
   return MILESTONE_SEED.map((seed) => ({
     id: crypto.randomUUID(),
     ...seed,
+    // Abby's terminal Phase 4 evaluation — the one milestone whose result
+    // decides whether a dog is placement-ready, needs additional
+    // objectives, or is released. See MilestoneTemplate.isFinalOutcomeMilestone.
+    isFinalOutcomeMilestone: seed.title === 'Advanced Final Blindfold',
     createdDate: now,
     updatedDate: now,
   }));
