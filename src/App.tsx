@@ -186,39 +186,47 @@ function App() {
 
   return (
     <div className="min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-      <header className="border-b border-gray-200 dark:border-gray-700 p-4 flex items-center justify-between">
-        <Link to="/settings" title="Settings" className="text-xl">
+      <header className="border-b border-gray-200 dark:border-gray-700 p-4 flex items-center justify-between gap-2">
+        <Link to="/settings" title="Settings" className="shrink-0 text-xl">
           ⚙️
         </Link>
-        <div className="flex items-center gap-4">
+        <div className="flex min-w-0 items-center gap-3 sm:gap-4">
           {syncStatus === 'error' && (
-            <span title="Some changes may not be saved to the server yet" className="text-xs text-amber-500">
+            <span
+              title="Some changes may not be saved to the server yet"
+              className="shrink-0 text-xs text-amber-500"
+            >
               ⚠️ Not synced
             </span>
           )}
-          {syncStatus === 'syncing' && <span className="text-xs text-gray-400">Syncing…</span>}
+          {syncStatus === 'syncing' && (
+            <span className="shrink-0 text-xs text-gray-400">Syncing…</span>
+          )}
           <Link
             to="/"
             title="Home"
-            className="flex items-center gap-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:underline"
+            className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:underline"
           >
             {session.profilePhotoUrl ? (
               <img
                 src={session.profilePhotoUrl}
                 alt=""
-                className="h-7 w-7 rounded-full object-cover"
+                className="h-7 w-7 shrink-0 rounded-full object-cover"
               />
             ) : (
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-sm">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-sm">
                 🧑‍🏫
               </span>
             )}
-            {session.name}
+            <span className="truncate">{session.name}</span>
           </Link>
-          <Link to="/folders" className="text-sm text-gray-500 hover:underline">
+          <Link to="/folders" className="shrink-0 text-sm text-gray-500 hover:underline">
             📂 Folders
           </Link>
-          <button onClick={() => logout()} className="text-sm text-gray-500 hover:underline">
+          <button
+            onClick={() => logout()}
+            className="shrink-0 text-sm text-gray-500 hover:underline"
+          >
             Log out
           </button>
         </div>
