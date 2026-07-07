@@ -1277,18 +1277,27 @@ export function setMilestoneOutcome(
   outcome: FinalOutcome | null,
 ): boolean {
   const completion = findOrCreateMilestoneCompletion(dogId, milestoneTemplateId);
+  const previousOutcome = completion.outcome;
   completion.outcome = outcome;
   completion.completed = outcome === 'Placement Ready';
   completion.dateCompleted = completion.completed ? now() : null;
   refreshDogProgress(dogId);
-  // Inlined rather than calling releaseDog() (which calls notify() itself) —
-  // this keeps the completion change and the release in one atomic
-  // write/sync instead of two, and the same "graduated dogs can't be
-  // released" guard still applies.
+  // Inlined rather than calling releaseDog()/reactivateDog() (which each call
+  // notify() themselves) — this keeps the completion change and the
+  // release/reactivate in one atomic write/sync instead of two, and the same
+  // "graduated dogs can't be released" guard still applies.
   const dog = db.dogs.find((d) => d.id === dogId);
   if (outcome === 'Fail' && dog && !dog.graduated) {
     dog.released = true;
     dog.releasedDate = now();
+    dog.updatedDate = now();
+  } else if (previousOutcome === 'Fail' && outcome !== 'Fail' && dog && dog.released) {
+    // The release was a side effect of the prior Fail outcome — clearing the
+    // mis-click or moving to Additional Objectives must undo it, or the dog
+    // is left released while the UI shows "No decision"/"Additional
+    // Objectives".
+    dog.released = false;
+    dog.releasedDate = null;
     dog.updatedDate = now();
   }
   const persisted = notify();
