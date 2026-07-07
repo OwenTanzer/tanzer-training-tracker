@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import type {
   Dog,
   DogChecklistCompletion,
@@ -636,6 +636,10 @@ export function updateDog(id: string, updates: Partial<Dog>): boolean {
 export function releaseDog(id: string): boolean {
   const dog = db.dogs.find((d) => d.id === id);
   if (!dog) return false;
+  // Released and Graduated are mutually exclusive outcomes for a dog —
+  // Graduated status must be removed first (see markDogGraduated's own
+  // guard for the reverse direction).
+  if (dog.graduated) return false;
   dog.released = true;
   dog.releasedDate = now();
   dog.updatedDate = now();
@@ -663,6 +667,10 @@ export function reactivateDog(id: string): boolean {
 export function markDogGraduated(id: string): boolean {
   const dog = db.dogs.find((d) => d.id === id);
   if (!dog) return false;
+  // Released and Graduated are mutually exclusive outcomes for a dog — a
+  // released dog must be reactivated first (see releaseDog's own guard for
+  // the reverse direction).
+  if (dog.released) return false;
   const completedAt = now();
 
   db.checklistItems.forEach((item) => {
@@ -772,13 +780,38 @@ function isLocalToday(dateIso: string): boolean {
   );
 }
 
+function msUntilNextLocalMidnight(): number {
+  const midnight = new Date();
+  midnight.setHours(24, 0, 0, 0); // Date normalizes this to the next day's 00:00.
+  return midnight.getTime() - Date.now();
+}
+
 // Worked-today (#47) is deliberately derived-only from the log itself, rather
 // than a stored flag — the log's createdDate is already the source of truth
 // for "was this dog worked with today," and a derived value can't drift out
-// of sync the way a manually-set/reset flag could. It also naturally resets
-// at local midnight with no cleanup job needed.
+// of sync the way a manually-set/reset flag could. But "derived" only rolls
+// over on the next render — a tab left open across midnight with nothing
+// else triggering a render would otherwise keep showing yesterday's badge
+// indefinitely, so this schedules its own re-render for the next local
+// midnight (and the one after that, for as long as the component stays
+// mounted) purely to force that recomputation.
 export function useDogWorkedToday(dogId: string): boolean {
-  return useDatabase().reports.some((r) => r.dogId === dogId && isLocalToday(r.createdDate));
+  const reports = useDatabase().reports;
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    function scheduleNext() {
+      timer = setTimeout(() => {
+        setTick((n) => n + 1);
+        scheduleNext();
+      }, msUntilNextLocalMidnight());
+    }
+    scheduleNext();
+    return () => clearTimeout(timer);
+  }, []);
+
+  return reports.some((r) => r.dogId === dogId && isLocalToday(r.createdDate));
 }
 
 export function useRedFlaggedReports(): TrainingReport[] {

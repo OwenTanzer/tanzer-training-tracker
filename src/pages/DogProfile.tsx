@@ -230,6 +230,10 @@ export function DogProfile() {
 
   function handleRelease() {
     if (!dog) return;
+    if (dog.graduated) {
+      alert(`Remove ${dog.name}'s Graduated status before releasing them from training.`);
+      return;
+    }
     if (!confirm(`Mark ${dog.name} as released from training? Their record is kept, just marked inactive.`)) {
       return;
     }
@@ -244,6 +248,10 @@ export function DogProfile() {
 
   function handleMarkGraduated() {
     if (!dog) return;
+    if (dog.released) {
+      alert(`Reactivate ${dog.name} before marking them Graduated.`);
+      return;
+    }
     if (
       !confirm(
         `Mark ${dog.name} as Graduated? This checks off every current skill and milestone and freezes their progress at 100%, even if the shared skill/milestone list changes later.`,
@@ -390,7 +398,11 @@ export function DogProfile() {
         ) : (
           <button
             onClick={handleRelease}
-            className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
+            disabled={dog.graduated}
+            title={dog.graduated ? "Remove this dog's Graduated status first" : undefined}
+            className={`rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-950 ${
+              dog.graduated ? 'opacity-40 cursor-not-allowed hover:bg-transparent dark:hover:bg-transparent' : ''
+            }`}
           >
             Release from Training
           </button>
@@ -405,7 +417,11 @@ export function DogProfile() {
         ) : (
           <button
             onClick={handleMarkGraduated}
-            className="rounded-md border border-emerald-300 px-3 py-1.5 text-sm font-medium text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950"
+            disabled={dog.released}
+            title={dog.released ? 'Reactivate this dog first' : undefined}
+            className={`rounded-md border border-emerald-300 px-3 py-1.5 text-sm font-medium text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950 ${
+              dog.released ? 'opacity-40 cursor-not-allowed hover:bg-transparent dark:hover:bg-transparent' : ''
+            }`}
           >
             🎓 Mark Graduated
           </button>
