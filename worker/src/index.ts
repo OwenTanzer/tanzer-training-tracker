@@ -233,8 +233,16 @@ async function handleUpdateAccount(request: Request, env: Env): Promise<Response
   }
 
   if (body.profilePhotoKey !== undefined) {
+    const key = body.profilePhotoKey;
+    if (key !== null) {
+      if (!key.startsWith(`instructors/${auth}/`)) {
+        return errorResponse(request, env, 'profilePhotoKey does not belong to this instructor', 403);
+      }
+      const object = await env.PHOTOS.head(key);
+      if (!object) return errorResponse(request, env, 'profilePhotoKey does not exist', 400);
+    }
     updates.push('profile_photo_key = ?');
-    values.push(body.profilePhotoKey);
+    values.push(key);
   }
 
   if (updates.length === 0) return errorResponse(request, env, 'Nothing to update', 400);
