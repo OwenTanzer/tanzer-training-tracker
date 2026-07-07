@@ -17,8 +17,8 @@ export function Breadcrumbs({
 
   return (
     <nav className="flex flex-wrap items-center gap-1 text-sm text-gray-500 dark:text-gray-400">
-      <Link to="/" className="hover:text-sky-500">
-        Home
+      <Link to="/folders" className="hover:text-sky-500">
+        My Folders
       </Link>
       {chain.map((f) => (
         <span key={f.id} className="flex items-center gap-1">

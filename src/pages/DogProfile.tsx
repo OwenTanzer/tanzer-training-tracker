@@ -13,45 +13,84 @@ import {
   reactivateDog,
   releaseDog,
   removeDogGraduatedStatus,
+  setMilestoneOutcome,
   toggleChecklistCompletion,
   toggleChecklistItemFlag,
+  toggleDogExcludedFromStats,
   toggleDogMilestoneCompletion,
   toggleReportRedFlag,
   updateDog,
   updateReport,
   useChecklistItems,
+  useDistractionTemplates,
   useDog,
   useDogCompletions,
   useDogMilestoneCompletions,
+  useDogMilestoneSessionCounts,
+  useDogSkillSessionCounts,
   useDogWorkedToday,
   useFolder,
   useLocations,
   useMilestoneTemplates,
   useReportsForDog,
 } from '../data/store';
-import { PHASES, type Location, type Phase, type TrainingReport } from '../types';
+import {
+  DISTRACTION_SEVERITIES,
+  FINAL_OUTCOMES,
+  PHASES,
+  type DistractionSeverity,
+  type DistractionTemplate,
+  type FinalOutcome,
+  type Location,
+  type Phase,
+  type TrainingReport,
+} from '../types';
+
+const OUTCOME_STYLES: Record<FinalOutcome, string> = {
+  'Placement Ready': 'text-emerald-600 dark:text-emerald-400',
+  'Additional Objectives': 'text-amber-600 dark:text-amber-400',
+  Fail: 'text-red-500',
+};
+
+const OUTCOME_ICONS: Record<FinalOutcome, string> = {
+  'Placement Ready': '🟢',
+  'Additional Objectives': '🟡',
+  Fail: '🔴',
+};
 
 function EditReportForm({
   report,
   locations,
+  distractionTemplates,
   onCancel,
   onSaved,
 }: {
   report: TrainingReport;
   locations: Location[];
+  distractionTemplates: DistractionTemplate[];
   onCancel: () => void;
   onSaved: () => void;
 }) {
   const skillsForPhase = useChecklistItems(report.phase);
+  const milestonesForPhase = useMilestoneTemplates(report.phase);
   const [redFlag, setRedFlag] = useState(report.redFlag);
   const [locationId, setLocationId] = useState(report.locationId ?? '');
   const [notes, setNotes] = useState(report.notes);
-  // Filtered against this phase's skills at init — a report saved before phase
-  // was locked down (or otherwise corrupted) could carry skillIds from a
-  // different phase than its own, which would never show up as a checkbox
-  // here but would still round-trip back into storage on save otherwise.
+  // Filtered against this phase's skills/milestones at init — a report saved
+  // before phase was locked down (or otherwise corrupted) could carry ids
+  // from a different phase than its own, which would never show up as a
+  // checkbox here but would still round-trip back into storage on save
+  // otherwise.
   const [skillIds, setSkillIds] = useState<string[]>(() =>
     report.skillIds.filter((id) => skillsForPhase.some((item) => item.id === id)),
+  );
+  const [milestoneIds, setMilestoneIds] = useState<string[]>(() =>
+    report.milestoneIds.filter((id) => milestonesForPhase.some((m) => m.id === id)),
+  );
+  const [distractionSeverities, setDistractionSeverities] = useState<
+    Record<string, DistractionSeverity | ''>
+  >(() =>
+    Object.fromEntries(report.distractions.map((d) => [d.distractionId, d.severity])),
   );
   const [error, setError] = useState<string | null>(null);
 
@@ -59,9 +98,23 @@ function EditReportForm({
     setSkillIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
   }
 
+  function toggleMilestone(id: string) {
+    setMilestoneIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
+  }
+
+  function setDistractionSeverity(distractionId: string, severity: DistractionSeverity | '') {
+    setDistractionSeverities((prev) => ({ ...prev, [distractionId]: severity }));
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const validSkillIds = skillIds.filter((id) => skillsForPhase.some((item) => item.id === id));
+    const validMilestoneIds = milestoneIds.filter((id) =>
+      milestonesForPhase.some((m) => m.id === id),
+    );
+    const distractions = Object.entries(distractionSeverities)
+      .filter((entry): entry is [string, DistractionSeverity] => entry[1] !== '')
+      .map(([distractionId, severity]) => ({ distractionId, severity }));
     const persisted = updateReport(report.id, {
       phase: report.phase,
       redFlag,
@@ -69,6 +122,8 @@ function EditReportForm({
       notes,
       picture: report.picture,
       skillIds: validSkillIds,
+      milestoneIds: validMilestoneIds,
+      distractions,
     });
     if (!persisted) {
       setError(
@@ -86,6 +141,7 @@ function EditReportForm({
         <span className="text-xs text-gray-400">— phase is locked to the log's original phase</span>
       </p>
       <div className="space-y-1">
+        <p className="text-xs uppercase tracking-wide text-gray-500">Skills worked on</p>
         {skillsForPhase.map((item) => (
           <label key={item.id} className="flex items-center gap-2">
             <input
@@ -95,6 +151,41 @@ function EditReportForm({
             />
             {item.title}
           </label>
+        ))}
+      </div>
+      <div className="space-y-1">
+        <p className="text-xs uppercase tracking-wide text-gray-500">Milestones worked on</p>
+        {milestonesForPhase.map((m) => (
+          <label key={m.id} className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={milestoneIds.includes(m.id)}
+              onChange={() => toggleMilestone(m.id)}
+            />
+            {m.title}
+          </label>
+        ))}
+      </div>
+      <div className="space-y-1">
+        <p className="text-xs uppercase tracking-wide text-gray-500">Distractions encountered</p>
+        {distractionTemplates.map((d) => (
+          <div key={d.id} className="flex items-center justify-between gap-2">
+            <span>{d.title}</span>
+            <select
+              value={distractionSeverities[d.id] ?? ''}
+              onChange={(e) =>
+                setDistractionSeverity(d.id, e.target.value as DistractionSeverity | '')
+              }
+              className="rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
+            >
+              <option value="">Not encountered</option>
+              {DISTRACTION_SEVERITIES.map((severity) => (
+                <option key={severity} value={severity}>
+                  {severity}
+                </option>
+              ))}
+            </select>
+          </div>
         ))}
       </div>
       <label className="flex items-center gap-2">
@@ -148,10 +239,14 @@ export function DogProfile() {
   const allChecklistItems = useChecklistItems();
   const completions = useDogCompletions(dogId ?? '');
   const milestones = useMilestoneTemplates(dog?.currentPhase);
+  const allMilestoneTemplates = useMilestoneTemplates();
   const milestoneCompletions = useDogMilestoneCompletions(dogId ?? '');
   const allReports = useReportsForDog(dogId ?? '');
   const workedToday = useDogWorkedToday(dogId ?? '');
   const locations = useLocations();
+  const distractionTemplates = useDistractionTemplates();
+  const skillSessionCounts = useDogSkillSessionCounts(dogId ?? '');
+  const milestoneSessionCounts = useDogMilestoneSessionCounts(dogId ?? '');
 
   const [hideCompletedSkills, setHideCompletedSkills] = useState(false);
   const [phaseFilter, setPhaseFilter] = useState<Phase | 'all'>('all');
@@ -213,7 +308,7 @@ export function DogProfile() {
     if (!dog) return;
     if (!confirm(`Delete ${dog.name}'s profile? This cannot be undone.`)) return;
     deleteDog(dog.id);
-    navigate(folder ? `/folder/${folder.id}` : '/');
+    navigate(folder ? `/folder/${folder.id}` : '/folders');
   }
 
   function handleRenameSelfSubmit(e: React.FormEvent) {
@@ -275,13 +370,27 @@ export function DogProfile() {
     deleteReport(id);
   }
 
+  function handleMilestoneOutcomeChange(milestoneId: string, value: string) {
+    if (!dog) return;
+    const outcome = (value || null) as FinalOutcome | null;
+    if (
+      outcome === 'Fail' &&
+      !confirm(
+        `Mark ${dog.name} as Failed on this evaluation? This automatically releases them from training.`,
+      )
+    ) {
+      return;
+    }
+    setMilestoneOutcome(dog.id, milestoneId, outcome);
+  }
+
   return (
     <div className="max-w-3xl mx-auto p-4 space-y-6">
       <Link
-        to={folder ? `/folder/${folder.id}` : '/'}
+        to={folder ? `/folder/${folder.id}` : '/folders'}
         className="text-sm text-sky-500 hover:underline"
       >
-        ← Back to {folder ? folder.name : 'Home'}
+        ← Back to {folder ? folder.name : 'My Folders'}
       </Link>
 
       <div className="flex items-start gap-4">
@@ -329,6 +438,14 @@ export function DogProfile() {
                   className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
                 >
                   Worked today
+                </span>
+              )}
+              {dog.excludedFromStats && (
+                <span
+                  title="This dog is omitted from Trainer History's refined success rate"
+                  className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+                >
+                  Excluded from stats
                 </span>
               )}
             </div>
@@ -427,6 +544,21 @@ export function DogProfile() {
           </button>
         )}
         <button
+          onClick={() => toggleDogExcludedFromStats(dog.id)}
+          title={
+            dog.excludedFromStats
+              ? 'Include this dog in Trainer History success-rate stats again'
+              : "Omit this dog (e.g. a pass-back, or released for health) from Trainer History's refined success rate"
+          }
+          className={`rounded-md border px-3 py-1.5 text-sm font-medium ${
+            dog.excludedFromStats
+              ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-400'
+              : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
+          }`}
+        >
+          {dog.excludedFromStats ? '📊 Excluded from Stats' : '📊 Exclude from Stats'}
+        </button>
+        <button
           onClick={handleDeleteDog}
           className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
         >
@@ -444,7 +576,7 @@ export function DogProfile() {
 
       <p className="text-sm">
         <Link to="/templates" className="text-sky-500 hover:underline">
-          ⚙️ Manage skills &amp; milestones
+          ⚙️ Manage training options
         </Link>{' '}
         <span className="text-gray-400">— changes apply to every dog</span>
       </p>
@@ -486,6 +618,11 @@ export function DogProfile() {
                   {!completion?.completed && completion?.inProgress && (
                     <span className="text-xs text-sky-500">● In progress</span>
                   )}
+                  {(skillSessionCounts[item.id] ?? 0) > 0 && (
+                    <span className="text-xs text-gray-400">
+                      Worked {skillSessionCounts[item.id]}×
+                    </span>
+                  )}
                 </label>
                 <button
                   onClick={() => toggleChecklistItemFlag(dog.id, item.id)}
@@ -524,6 +661,44 @@ export function DogProfile() {
         <ul className="space-y-1">
           {milestones.map((m) => {
             const completion = milestoneCompletions.find((c) => c.milestoneTemplateId === m.id);
+            if (m.isFinalOutcomeMilestone) {
+              return (
+                <li
+                  key={m.id}
+                  className="rounded-lg border border-gray-200 dark:border-gray-700 p-2 space-y-1.5"
+                >
+                  <div className="flex items-center justify-between gap-2 text-sm">
+                    <span className="font-medium text-gray-800 dark:text-gray-200">
+                      {m.title}
+                    </span>
+                    {(milestoneSessionCounts[m.id] ?? 0) > 0 && (
+                      <span className="text-xs text-gray-400">
+                        Worked {milestoneSessionCounts[m.id]}×
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <select
+                      value={completion?.outcome ?? ''}
+                      onChange={(e) => handleMilestoneOutcomeChange(m.id, e.target.value)}
+                      className="rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
+                    >
+                      <option value="">No decision yet</option>
+                      {FINAL_OUTCOMES.map((outcome) => (
+                        <option key={outcome} value={outcome}>
+                          {outcome}
+                        </option>
+                      ))}
+                    </select>
+                    {completion?.outcome && (
+                      <span className={`text-xs font-medium ${OUTCOME_STYLES[completion.outcome]}`}>
+                        {OUTCOME_ICONS[completion.outcome]} {completion.outcome}
+                      </span>
+                    )}
+                  </div>
+                </li>
+              );
+            }
             return (
               <li key={m.id}>
                 <label className="flex items-center gap-2 text-sm">
@@ -541,6 +716,11 @@ export function DogProfile() {
                   >
                     {m.title}
                   </span>
+                  {(milestoneSessionCounts[m.id] ?? 0) > 0 && (
+                    <span className="text-xs text-gray-400">
+                      Worked {milestoneSessionCounts[m.id]}×
+                    </span>
+                  )}
                 </label>
               </li>
             );
@@ -601,6 +781,7 @@ export function DogProfile() {
                   <EditReportForm
                     report={r}
                     locations={locations}
+                    distractionTemplates={distractionTemplates}
                     onCancel={() => setEditingReportId(null)}
                     onSaved={() => setEditingReportId(null)}
                   />
@@ -661,6 +842,29 @@ export function DogProfile() {
                     Skills worked on:{' '}
                     {r.skillIds
                       .map((id) => allChecklistItems.find((i) => i.id === id)?.title)
+                      .filter(Boolean)
+                      .join(', ')}
+                  </p>
+                )}
+                {r.milestoneIds.length > 0 && (
+                  <p className="text-xs text-gray-500">
+                    Milestones worked on:{' '}
+                    {r.milestoneIds
+                      .map((id) => allMilestoneTemplates.find((m) => m.id === id)?.title)
+                      .filter(Boolean)
+                      .join(', ')}
+                  </p>
+                )}
+                {r.distractions.length > 0 && (
+                  <p className="text-xs text-gray-500">
+                    Distractions:{' '}
+                    {r.distractions
+                      .map((d) => {
+                        const title = distractionTemplates.find(
+                          (t) => t.id === d.distractionId,
+                        )?.title;
+                        return title ? `${title} (${d.severity})` : null;
+                      })
                       .filter(Boolean)
                       .join(', ')}
                   </p>

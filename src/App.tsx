@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, Route, Routes } from 'react-router-dom';
 import { LoadingScreen } from './components/LoadingScreen';
-import { ThemeToggle } from './components/ThemeToggle';
-import { logout, useSession } from './lib/auth';
+import { logout, refreshAccount, useSession } from './lib/auth';
 import {
   declineLegacyImport,
   getImportableLegacyDatabase,
@@ -12,7 +11,6 @@ import {
   resetLocalStore,
   seedDefaultTemplatesIfEmpty,
   useHydrated,
-  useLegacyImportAvailable,
   useSyncStatus,
 } from './data/store';
 import type { Database } from './data/db';
@@ -24,13 +22,14 @@ import { Login } from './pages/Login';
 import { ManageTemplates } from './pages/ManageTemplates';
 import { NewReport } from './pages/NewReport';
 import { RedFlags } from './pages/RedFlags';
+import { Settings } from './pages/Settings';
+import { TrainerHistory } from './pages/TrainerHistory';
 
 function App() {
   const [splashDone, setSplashDone] = useState(false);
   const session = useSession();
   const hydrated = useHydrated();
   const syncStatus = useSyncStatus();
-  const legacyImportAvailable = useLegacyImportAvailable();
   const [hydrateError, setHydrateError] = useState<string | null>(null);
   const [legacyImport, setLegacyImport] = useState<Database | null>(null);
   const [importing, setImporting] = useState(false);
@@ -67,6 +66,18 @@ function App() {
       cancelled = true;
     };
   }, [session]);
+
+  // Keyed on instructorId rather than the whole session object — refreshAccount()
+  // itself reassigns session (a new object) once it applies, and depending on
+  // the whole object here would re-trigger this same effect on every refresh.
+  useEffect(() => {
+    if (!session) return;
+    refreshAccount().catch(() => {
+      // Best-effort background refresh — a stale local name/photo isn't
+      // worth surfacing an error over; the data hydrate above already
+      // reports real connectivity problems.
+    });
+  }, [session?.instructorId]);
 
   function handleImportLegacy() {
     if (!legacyImport) return;
@@ -175,57 +186,62 @@ function App() {
 
   return (
     <div className="min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-      <header className="border-b border-gray-200 dark:border-gray-700 p-4 flex items-center justify-between">
-        <Link to="/" className="font-semibold">
-          🐕 Tanzer Training Tracker
+      <header className="border-b border-gray-200 dark:border-gray-700 p-4 flex items-center justify-between gap-2">
+        <Link to="/settings" title="Settings" className="shrink-0 text-xl">
+          ⚙️
         </Link>
-        <div className="flex items-center gap-4">
-          <Link to="/templates" className="text-sm text-gray-500 hover:underline">
-            ⚙️ Skills &amp; Milestones
-          </Link>
-          <Link to="/red-flags" className="text-sm text-red-500 hover:underline">
-            🚩 Red Flags
-          </Link>
-          <Link to="/diagnostics" className="text-sm text-gray-500 hover:underline">
-            🩺 Diagnostics
-            {legacyImportAvailable && (
-              <span
-                title="There's data from before accounts existed you can still import"
-                className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-500 align-middle"
-              />
-            )}
-          </Link>
+        <div className="flex min-w-0 items-center gap-3 sm:gap-4">
           {syncStatus === 'error' && (
-            <span title="Some changes may not be saved to the server yet" className="text-xs text-amber-500">
+            <span
+              title="Some changes may not be saved to the server yet"
+              className="shrink-0 text-xs text-amber-500"
+            >
               ⚠️ Not synced
             </span>
           )}
-          {syncStatus === 'syncing' && <span className="text-xs text-gray-400">Syncing…</span>}
+          {syncStatus === 'syncing' && (
+            <span className="shrink-0 text-xs text-gray-400">Syncing…</span>
+          )}
           <Link
-            to="/account"
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:underline"
+            to="/"
+            title="Home"
+            className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:underline"
           >
             {session.profilePhotoUrl ? (
               <img
                 src={session.profilePhotoUrl}
                 alt=""
-                className="h-5 w-5 rounded-full object-cover"
+                className="h-7 w-7 shrink-0 rounded-full object-cover"
               />
-            ) : null}
-            {session.name}
+            ) : (
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-sm">
+                🧑‍🏫
+              </span>
+            )}
+            <span className="truncate">{session.name}</span>
           </Link>
-          <button onClick={() => logout()} className="text-sm text-gray-500 hover:underline">
+          <Link to="/folders" className="shrink-0 text-sm text-gray-500 hover:underline">
+            📂 Folders
+          </Link>
+          <button
+            onClick={() => logout()}
+            className="shrink-0 text-sm text-gray-500 hover:underline"
+          >
             Log out
           </button>
-          <ThemeToggle />
         </div>
       </header>
       <Routes>
-        <Route path="/" element={<FolderView />} />
+        <Route path="/" element={<TrainerHistory />} />
+        {/* /trainer-history kept as an alias of the new home route, in case
+            anything external still links to it. */}
+        <Route path="/trainer-history" element={<TrainerHistory />} />
+        <Route path="/folders" element={<FolderView />} />
         <Route path="/folder/:folderId" element={<FolderView />} />
         <Route path="/dog/:dogId" element={<DogProfile />} />
         <Route path="/dog/:dogId/report/new" element={<NewReport />} />
         <Route path="/red-flags" element={<RedFlags />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="/diagnostics" element={<Diagnostics />} />
         <Route path="/templates" element={<ManageTemplates />} />
         <Route path="/account" element={<AccountSettings />} />

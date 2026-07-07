@@ -6,15 +6,19 @@ import {
   createLocation,
   createReport,
   useChecklistItems,
+  useDistractionTemplates,
   useDog,
   useLocations,
+  useMilestoneTemplates,
 } from '../data/store';
+import { DISTRACTION_SEVERITIES, type DistractionSeverity } from '../types';
 
 export function NewReport() {
   const { dogId } = useParams<{ dogId: string }>();
   const navigate = useNavigate();
   const dog = useDog(dogId);
   const locations = useLocations();
+  const distractionTemplates = useDistractionTemplates();
 
   const [redFlag, setRedFlag] = useState(false);
   const [locationId, setLocationId] = useState('');
@@ -33,7 +37,15 @@ export function NewReport() {
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [skillIds, setSkillIds] = useState<string[]>([]);
+  const [milestoneIds, setMilestoneIds] = useState<string[]>([]);
+  // '' means "not encountered this session" and is left out of the saved
+  // distractions array on submit — only rows the trainer actually set a
+  // severity on get recorded.
+  const [distractionSeverities, setDistractionSeverities] = useState<
+    Record<string, DistractionSeverity | ''>
+  >({});
   const skillsForPhase = useChecklistItems(dog?.currentPhase);
+  const milestonesForPhase = useMilestoneTemplates(dog?.currentPhase);
 
   useEffect(() => {
     if (!pictureFile) return;
@@ -50,6 +62,16 @@ export function NewReport() {
     setSkillIds((prev) =>
       prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id],
     );
+  }
+
+  function toggleMilestone(id: string) {
+    setMilestoneIds((prev) =>
+      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id],
+    );
+  }
+
+  function setDistractionSeverity(distractionId: string, severity: DistractionSeverity | '') {
+    setDistractionSeverities((prev) => ({ ...prev, [distractionId]: severity }));
   }
 
   function handlePictureChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -78,6 +100,9 @@ export function NewReport() {
       if (!finalLocationId && newLocationName.trim()) {
         finalLocationId = createLocation(newLocationName.trim()).id;
       }
+      const distractions = Object.entries(distractionSeverities)
+        .filter((entry): entry is [string, DistractionSeverity] => entry[1] !== '')
+        .map(([distractionId, severity]) => ({ distractionId, severity }));
       const { persisted } = createReport({
         dogId: dogId!,
         phase: dog!.currentPhase,
@@ -86,6 +111,8 @@ export function NewReport() {
         notes,
         picture,
         skillIds,
+        milestoneIds,
+        distractions,
       });
       if (!persisted) {
         setSubmitError(
@@ -142,6 +169,65 @@ export function NewReport() {
             ))}
             {skillsForPhase.length === 0 && (
               <p className="text-sm text-gray-400">No skills set up for {dog.currentPhase} yet.</p>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Milestones worked on
+          </label>
+          <div className="space-y-1">
+            {milestonesForPhase.map((m) => (
+              <label key={m.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={milestoneIds.includes(m.id)}
+                  onChange={() => toggleMilestone(m.id)}
+                />
+                {m.title}
+              </label>
+            ))}
+            {milestonesForPhase.length === 0 && (
+              <p className="text-sm text-gray-400">
+                No milestones set up for {dog.currentPhase} yet.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Distractions encountered
+          </label>
+          <div className="space-y-1">
+            {distractionTemplates.map((d) => (
+              <div key={d.id} className="flex items-center justify-between gap-2 text-sm">
+                <span className="text-gray-700 dark:text-gray-300">{d.title}</span>
+                <select
+                  value={distractionSeverities[d.id] ?? ''}
+                  onChange={(e) =>
+                    setDistractionSeverity(d.id, e.target.value as DistractionSeverity | '')
+                  }
+                  className="rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-sm"
+                >
+                  <option value="">Not encountered</option>
+                  {DISTRACTION_SEVERITIES.map((severity) => (
+                    <option key={severity} value={severity}>
+                      {severity}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+            {distractionTemplates.length === 0 && (
+              <p className="text-sm text-gray-400">
+                No distraction templates set up yet.{' '}
+                <Link to="/templates" className="text-sky-500 hover:underline">
+                  Add some
+                </Link>
+                .
+              </p>
             )}
           </div>
         </div>

@@ -2,6 +2,7 @@ import type {
   Dog,
   DogChecklistCompletion,
   DogMilestoneCompletion,
+  DistractionTemplate,
   Folder,
   Location,
   MilestoneTemplate,
@@ -21,6 +22,7 @@ export interface Database {
   completions: DogChecklistCompletion[];
   milestoneTemplates: MilestoneTemplate[];
   dogMilestoneCompletions: DogMilestoneCompletion[];
+  distractionTemplates: DistractionTemplate[];
   // One-time gate for migrateLegacyDefaultTemplates() (#30) — true means this
   // account's checklist/milestones either started on, or have already been
   // upgraded to, Abby's real defaults, so the migration must never touch them
@@ -28,6 +30,10 @@ export interface Database {
   // "different from Abby's defaults" and get silently overwritten on the next
   // login.
   templatesMigratedToAbbyDefaults: boolean;
+  // The one folder pinned to the top of Trainer History for quick access —
+  // null means nothing is pinned. Cleared automatically if that folder is
+  // deleted (see deleteFolder in store.ts).
+  pinnedFolderId: string | null;
 }
 
 const STORAGE_KEY = 'abbys-dog-chej:db:v1';
@@ -42,7 +48,9 @@ export function emptyDatabase(): Database {
     completions: [],
     milestoneTemplates: buildDefaultMilestones(),
     dogMilestoneCompletions: [],
+    distractionTemplates: [],
     templatesMigratedToAbbyDefaults: true,
+    pinnedFolderId: null,
   };
 }
 
@@ -84,6 +92,7 @@ function migrateLegacyMilestones(legacy: LegacyMilestone[]): {
           phase: m.phase,
           title: m.title,
           sortOrder: milestoneTemplates.length,
+          isFinalOutcomeMilestone: false,
           createdDate: m.createdDate,
           updatedDate: m.updatedDate,
         });
@@ -96,6 +105,7 @@ function migrateLegacyMilestones(legacy: LegacyMilestone[]): {
         dateCompleted: m.dateCompleted,
         notes: m.notes,
         photo: m.photo,
+        outcome: null,
       });
     });
 
@@ -119,9 +129,9 @@ function backfillSortOrder<T extends { sortOrder?: number }>(
   });
 }
 
-// Dogs predating the "released" status (#13) or "graduated" lock (#31) won't
-// have these fields in their stored JSON at all, so they'd otherwise come
-// back as undefined.
+// Dogs predating the "released" status (#13), "graduated" lock (#31), or
+// stats-exclusion flag won't have these fields in their stored JSON at all,
+// so they'd otherwise come back as undefined.
 function backfillDogs(dogs: Dog[]): Dog[] {
   return backfillSortOrder(
     dogs.map((dog) => ({
@@ -130,20 +140,42 @@ function backfillDogs(dogs: Dog[]): Dog[] {
       releasedDate: dog.releasedDate ?? null,
       graduated: dog.graduated ?? false,
       graduatedDate: dog.graduatedDate ?? null,
+      excludedFromStats: dog.excludedFromStats ?? false,
     })),
     (dog) => dog.folderId,
   );
+}
+
+// Templates predating the final-outcome flag won't have it stored.
+function backfillMilestoneTemplates(templates: MilestoneTemplate[]): MilestoneTemplate[] {
+  return templates.map((template) => ({
+    ...template,
+    isFinalOutcomeMilestone: template.isFinalOutcomeMilestone ?? false,
+  }));
+}
+
+// Completions predating the final-outcome picker won't have this stored.
+function backfillDogMilestoneCompletions(
+  completions: DogMilestoneCompletion[],
+): DogMilestoneCompletion[] {
+  return completions.map((completion) => ({
+    ...completion,
+    outcome: completion.outcome ?? null,
+  }));
 }
 
 function backfillFolders(folders: Folder[]): Folder[] {
   return backfillSortOrder(folders, (folder) => folder.parentFolderId ?? 'root');
 }
 
-// Reports predating "skills worked on" (#18) won't have skillIds stored.
+// Reports predating "skills worked on" (#18), "milestones worked on" and
+// "distractions encountered" (#35/#36) won't have these fields stored.
 function backfillReports(reports: TrainingReport[]): TrainingReport[] {
   return reports.map((report) => ({
     ...report,
     skillIds: report.skillIds ?? [],
+    milestoneIds: report.milestoneIds ?? [],
+    distractions: report.distractions ?? [],
   }));
 }
 
@@ -167,10 +199,18 @@ export function normalizeDatabase(parsed: Record<string, unknown>): Database {
     database.dogs = backfillDogs(database.dogs ?? []);
     database.reports = backfillReports(database.reports ?? []);
     database.completions = backfillCompletions(database.completions ?? []);
+    database.milestoneTemplates = backfillMilestoneTemplates(database.milestoneTemplates ?? []);
+    database.dogMilestoneCompletions = backfillDogMilestoneCompletions(
+      database.dogMilestoneCompletions ?? [],
+    );
+    // Accounts predating distraction templates (#36) won't have this field at all.
+    database.distractionTemplates = database.distractionTemplates ?? [];
     // Accounts persisted before #30 won't have this field at all — treat its
     // absence as "not yet migrated" so migrateLegacyDefaultTemplates() runs
     // for them exactly once.
     database.templatesMigratedToAbbyDefaults = database.templatesMigratedToAbbyDefaults ?? false;
+    // Accounts predating the pinned-folder feature won't have this field at all.
+    database.pinnedFolderId = database.pinnedFolderId ?? null;
     return database;
   }
 
@@ -191,7 +231,9 @@ export function normalizeDatabase(parsed: Record<string, unknown>): Database {
         ? migrated.milestoneTemplates
         : buildDefaultMilestones(),
     dogMilestoneCompletions: migrated.dogMilestoneCompletions,
+    distractionTemplates: (parsed.distractionTemplates as DistractionTemplate[]) ?? [],
     templatesMigratedToAbbyDefaults: (parsed.templatesMigratedToAbbyDefaults as boolean | undefined) ?? false,
+    pinnedFolderId: (parsed.pinnedFolderId as string | null | undefined) ?? null,
   };
   return database;
 }

@@ -104,7 +104,12 @@ async function handleCreateInstructor(request: Request, env: Env): Promise<Respo
     .bind(token, id, now, sessionExpiry())
     .run();
 
-  return json(request, env, { token, instructorId: id, name, profilePhotoUrl: null, updatedAt: now }, 201);
+  return json(
+    request,
+    env,
+    { token, instructorId: id, name, profilePhotoUrl: null, createdAt: now, updatedAt: now },
+    201,
+  );
 }
 
 async function handleLogin(request: Request, env: Env): Promise<Response> {
@@ -114,10 +119,16 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
   if (!name || !passcode) return errorResponse(request, env, 'name and passcode are required', 400);
 
   const instructor = await env.DB.prepare(
-    'SELECT id, passcode_hash, passcode_salt, profile_photo_key FROM instructors WHERE name = ? COLLATE NOCASE',
+    'SELECT id, passcode_hash, passcode_salt, profile_photo_key, created_at FROM instructors WHERE name = ? COLLATE NOCASE',
   )
     .bind(name)
-    .first<{ id: string; passcode_hash: string; passcode_salt: string; profile_photo_key: string | null }>();
+    .first<{
+      id: string;
+      passcode_hash: string;
+      passcode_salt: string;
+      profile_photo_key: string | null;
+      created_at: string;
+    }>();
   if (!instructor) return errorResponse(request, env, 'Instructor not found', 404);
 
   const valid = await verifyPasscode(passcode, instructor.passcode_salt, instructor.passcode_hash);
@@ -139,6 +150,7 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
       instructorId: instructor.id,
       name,
       profilePhotoUrl: photoUrlForKey(request, instructor.profile_photo_key),
+      createdAt: instructor.created_at,
     },
     200,
   );
@@ -209,6 +221,27 @@ async function handleUploadPhoto(request: Request, env: Env): Promise<Response> 
   await env.PHOTOS.put(key, body, { httpMetadata: { contentType } });
 
   return json(request, env, { url: photoUrlForKey(request, key), key }, 201);
+}
+
+// Lets an already-signed-in device (e.g. a laptop with a session from
+// before a photo/name change on the phone) pick up the current name/photo
+// without forcing a logout+login — see the login/create/PATCH handlers
+// above for where those fields actually get written.
+async function handleGetAccount(request: Request, env: Env): Promise<Response> {
+  const auth = await requireAuth(request, env);
+  if (auth instanceof Response) return auth;
+
+  const row = await env.DB.prepare('SELECT name, profile_photo_key FROM instructors WHERE id = ?')
+    .bind(auth)
+    .first<{ name: string; profile_photo_key: string | null }>();
+  if (!row) return errorResponse(request, env, 'Instructor not found', 404);
+
+  return json(
+    request,
+    env,
+    { instructorId: auth, name: row.name, profilePhotoUrl: photoUrlForKey(request, row.profile_photo_key) },
+    200,
+  );
 }
 
 async function handleUpdateAccount(request: Request, env: Env): Promise<Response> {
@@ -313,6 +346,9 @@ export default {
       }
       if (pathname === '/api/photos' && method === 'POST') {
         return await handleUploadPhoto(request, env);
+      }
+      if (pathname === '/api/account' && method === 'GET') {
+        return await handleGetAccount(request, env);
       }
       if (pathname === '/api/account' && method === 'PATCH') {
         return await handleUpdateAccount(request, env);

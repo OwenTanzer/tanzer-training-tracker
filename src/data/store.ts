@@ -1,8 +1,11 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type {
   Dog,
+  DistractionObservation,
+  DistractionTemplate,
   DogChecklistCompletion,
   DogMilestoneCompletion,
+  FinalOutcome,
   Folder,
   GraduationStatus,
   Location,
@@ -411,6 +414,7 @@ export interface DatabaseCounts {
   completions: number;
   milestoneTemplates: number;
   dogMilestoneCompletions: number;
+  distractionTemplates: number;
   storageBytes: number;
 }
 
@@ -425,6 +429,7 @@ export function useDatabaseCounts(): DatabaseCounts {
     completions: state.completions.length,
     milestoneTemplates: state.milestoneTemplates.length,
     dogMilestoneCompletions: state.dogMilestoneCompletions.length,
+    distractionTemplates: state.distractionTemplates.length,
     storageBytes: JSON.stringify(state).length,
   };
 }
@@ -572,9 +577,24 @@ export function deleteFolder(id: string): DeleteFolderResult {
     };
   }
   db.folders = db.folders.filter((f) => f.id !== id);
+  // A pinned folder that gets deleted must not leave Trainer History pointing
+  // at a dangling id.
+  if (db.pinnedFolderId === id) db.pinnedFolderId = null;
   notify();
   logEvent('Folder deleted', id);
   return { deleted: true };
+}
+
+// The one folder pinned to the top of Trainer History for quick access.
+export function usePinnedFolderId(): string | null {
+  return useDatabase().pinnedFolderId;
+}
+
+export function setPinnedFolder(folderId: string | null): boolean {
+  db.pinnedFolderId = folderId;
+  const persisted = notify();
+  logEvent('Pinned folder set', folderId ?? 'none');
+  return persisted;
 }
 
 // ---- Dogs ----
@@ -608,6 +628,7 @@ export function createDog(
     releasedDate: null,
     graduated: false,
     graduatedDate: null,
+    excludedFromStats: false,
     createdDate: now(),
     updatedDate: now(),
   };
@@ -656,6 +677,20 @@ export function reactivateDog(id: string): boolean {
   dog.updatedDate = now();
   const persisted = notify();
   logEvent('Dog reactivated', id);
+  return persisted;
+}
+
+// Lets a trainer omit one dog (a pass-back, a health release, etc.) from the
+// "refined" success-rate calculation on Trainer History without touching
+// anything about the dog's actual record — released/graduated status,
+// progress, and completions are all completely unaffected.
+export function toggleDogExcludedFromStats(id: string): boolean {
+  const dog = db.dogs.find((d) => d.id === id);
+  if (!dog) return false;
+  dog.excludedFromStats = !dog.excludedFromStats;
+  dog.updatedDate = now();
+  const persisted = notify();
+  logEvent('Dog stats-exclusion toggled', `${id} -> ${dog.excludedFromStats}`);
   return persisted;
 }
 
@@ -709,6 +744,7 @@ export function markDogGraduated(id: string): boolean {
         dateCompleted: completedAt,
         notes: null,
         photo: null,
+        outcome: null,
       };
       db.dogMilestoneCompletions.push(completion);
     } else {
@@ -770,6 +806,35 @@ export function useReportsForDog(dogId: string): TrainingReport[] {
     .sort((a, b) => b.createdDate.localeCompare(a.createdDate));
 }
 
+// Session counts (#35) are purely informational — derived from how many of a
+// dog's logs mention a skill/milestone as worked on, independent of whether
+// it's since been marked complete. Nothing here drives completion; the
+// trainer still does that explicitly via toggleChecklistCompletion /
+// toggleDogMilestoneCompletion.
+export function useDogSkillSessionCounts(dogId: string): Record<string, number> {
+  const reports = useDatabase().reports;
+  const counts: Record<string, number> = {};
+  reports.forEach((r) => {
+    if (r.dogId !== dogId) return;
+    r.skillIds.forEach((id) => {
+      counts[id] = (counts[id] ?? 0) + 1;
+    });
+  });
+  return counts;
+}
+
+export function useDogMilestoneSessionCounts(dogId: string): Record<string, number> {
+  const reports = useDatabase().reports;
+  const counts: Record<string, number> = {};
+  reports.forEach((r) => {
+    if (r.dogId !== dogId) return;
+    r.milestoneIds.forEach((id) => {
+      counts[id] = (counts[id] ?? 0) + 1;
+    });
+  });
+  return counts;
+}
+
 function isLocalToday(dateIso: string): boolean {
   const d = new Date(dateIso);
   const today = new Date();
@@ -828,6 +893,8 @@ export interface NewReportInput {
   notes: string;
   picture: string | null;
   skillIds: string[];
+  milestoneIds: string[];
+  distractions: DistractionObservation[];
 }
 
 function markSkillsInProgress(dogId: string, skillIds: string[]) {
@@ -908,6 +975,8 @@ export interface UpdateReportInput {
   notes: string;
   picture: string | null;
   skillIds: string[];
+  milestoneIds: string[];
+  distractions: DistractionObservation[];
 }
 
 export function updateReport(id: string, updates: UpdateReportInput): boolean {
@@ -1083,6 +1152,7 @@ export function createMilestoneTemplate(phase: Phase, title: string): MilestoneT
     phase,
     title,
     sortOrder: siblingCount,
+    isFinalOutcomeMilestone: false,
     createdDate: now(),
     updatedDate: now(),
   };
@@ -1099,6 +1169,23 @@ export function renameMilestoneTemplate(id: string, title: string): boolean {
   template.title = title;
   template.updatedDate = now();
   return notify();
+}
+
+// Marks (or unmarks) a milestone as the terminal evaluation whose result
+// decides a dog's outcome — e.g. Abby's "Advanced Final Blindfold". Nothing
+// stops more than one milestone carrying this at once; it's the trainer's
+// own curriculum to configure, same as everything else in this file.
+export function toggleMilestoneFinalOutcomeFlag(id: string): boolean {
+  const template = db.milestoneTemplates.find((m) => m.id === id);
+  if (!template) return false;
+  template.isFinalOutcomeMilestone = !template.isFinalOutcomeMilestone;
+  template.updatedDate = now();
+  const persisted = notify();
+  logEvent(
+    'Milestone final-outcome flag toggled',
+    `${id} -> ${template.isFinalOutcomeMilestone}`,
+  );
+  return persisted;
 }
 
 export function deleteMilestoneTemplate(id: string): void {
@@ -1140,6 +1227,7 @@ export function toggleDogMilestoneCompletion(
       dateCompleted: null,
       notes: null,
       photo: null,
+      outcome: null,
     };
     db.dogMilestoneCompletions.push(completion);
   }
@@ -1151,4 +1239,298 @@ export function toggleDogMilestoneCompletion(
     'Milestone toggled',
     `dog ${dogId}, milestone ${milestoneTemplateId} -> ${completion.completed}`,
   );
+}
+
+function findOrCreateMilestoneCompletion(
+  dogId: string,
+  milestoneTemplateId: string,
+): DogMilestoneCompletion {
+  let completion = db.dogMilestoneCompletions.find(
+    (c) => c.dogId === dogId && c.milestoneTemplateId === milestoneTemplateId,
+  );
+  if (!completion) {
+    completion = {
+      id: uid(),
+      dogId,
+      milestoneTemplateId,
+      completed: false,
+      dateCompleted: null,
+      notes: null,
+      photo: null,
+      outcome: null,
+    };
+    db.dogMilestoneCompletions.push(completion);
+  }
+  return completion;
+}
+
+// Records the trainer's decision on a milestone flagged isFinalOutcomeMilestone
+// (e.g. the Advanced Final Blindfold). 'Placement Ready' completes the
+// milestone like a normal checkbox — it does not itself graduate the dog;
+// that's still the separate, deliberate markDogGraduated action. 'Additional
+// Objectives' leaves it incomplete: the dog keeps training. 'Fail' leaves it
+// incomplete and auto-releases the dog (respecting releaseDog's own
+// graduated-guard). Passing null clears a mis-click back to no decision.
+export function setMilestoneOutcome(
+  dogId: string,
+  milestoneTemplateId: string,
+  outcome: FinalOutcome | null,
+): boolean {
+  const completion = findOrCreateMilestoneCompletion(dogId, milestoneTemplateId);
+  const previousOutcome = completion.outcome;
+  completion.outcome = outcome;
+  completion.completed = outcome === 'Placement Ready';
+  completion.dateCompleted = completion.completed ? now() : null;
+  refreshDogProgress(dogId);
+  // Inlined rather than calling releaseDog()/reactivateDog() (which each call
+  // notify() themselves) — this keeps the completion change and the
+  // release/reactivate in one atomic write/sync instead of two, and the same
+  // "graduated dogs can't be released" guard still applies.
+  const dog = db.dogs.find((d) => d.id === dogId);
+  if (outcome === 'Fail' && dog && !dog.graduated) {
+    dog.released = true;
+    dog.releasedDate = now();
+    dog.updatedDate = now();
+  } else if (previousOutcome === 'Fail' && outcome !== 'Fail' && dog && dog.released) {
+    // The release was a side effect of the prior Fail outcome — clearing the
+    // mis-click or moving to Additional Objectives must undo it, or the dog
+    // is left released while the UI shows "No decision"/"Additional
+    // Objectives".
+    dog.released = false;
+    dog.releasedDate = null;
+    dog.updatedDate = now();
+  }
+  const persisted = notify();
+  logEvent(
+    'Milestone outcome set',
+    `dog ${dogId}, milestone ${milestoneTemplateId} -> ${outcome ?? 'cleared'}`,
+  );
+  return persisted;
+}
+
+// ---- Distraction Templates (global, shared across phases) (#36) ----
+
+export function useDistractionTemplates(): DistractionTemplate[] {
+  return [...useDatabase().distractionTemplates].sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+export function createDistractionTemplate(title: string): DistractionTemplate {
+  const template: DistractionTemplate = {
+    id: uid(),
+    title,
+    sortOrder: db.distractionTemplates.length,
+    createdDate: now(),
+    updatedDate: now(),
+  };
+  db.distractionTemplates.push(template);
+  notify();
+  logEvent('Distraction template created', title);
+  return template;
+}
+
+export function renameDistractionTemplate(id: string, title: string): boolean {
+  const template = db.distractionTemplates.find((d) => d.id === id);
+  if (!template) return false;
+  template.title = title;
+  template.updatedDate = now();
+  return notify();
+}
+
+export function deleteDistractionTemplate(id: string): void {
+  db.distractionTemplates = db.distractionTemplates.filter((d) => d.id !== id);
+  db.reports.forEach((r) => {
+    r.distractions = r.distractions.filter((d) => d.distractionId !== id);
+  });
+  notify();
+  logEvent('Distraction template deleted', id);
+}
+
+export function reorderDistractionTemplates(orderedIds: string[]): void {
+  orderedIds.forEach((id, index) => {
+    const template = db.distractionTemplates.find((d) => d.id === id);
+    if (template) template.sortOrder = index;
+  });
+  notify();
+  logEvent('Distraction templates reordered', '');
+}
+
+// ---- Trainer History dashboard (#27) ----
+//
+// Everything here is derived from this account's own db state — there is no
+// cross-instructor aggregation to guard against, since each instructor's data
+// is already a wholly separate server blob (see hydrateFromServer). Success
+// rate is a simple graduated-vs-released ratio (dogs still in progress never
+// count toward it either way) — it does not attempt the fuller outcome model
+// from #32/#33/#34 (pass-back, configurable milestone outcomes), which
+// hasn't landed yet.
+
+export interface SkillWorkedCount {
+  checklistItemId: string;
+  title: string;
+  phase: Phase;
+  count: number;
+}
+
+export interface DogActivitySummary {
+  dog: Dog;
+  lastWorkedDate: string | null;
+}
+
+export interface SuccessRate {
+  // null means no graduated-or-released dog exists yet to compute a rate
+  // from — every dog is still in progress.
+  percent: number | null;
+  graduated: number;
+  released: number;
+}
+
+export interface FinalOutcomeCounts {
+  placementReady: number;
+  additionalObjectives: number;
+  fail: number;
+  total: number;
+}
+
+export interface TrainerHistoryStats {
+  totalDogs: number;
+  activeDogs: number;
+  graduatedDogs: number;
+  releasedDogs: number;
+  totalLogs: number;
+  logsThisWeek: number;
+  logsThisMonth: number;
+  milestonesCompleted: number;
+  skillsWorkedOnTotal: number;
+  mostWorkedSkills: SkillWorkedCount[];
+  recentlyWorkedDogs: DogActivitySummary[];
+  dogsNotWorkedRecently: DogActivitySummary[];
+  successRateOverall: SuccessRate;
+  successRateRefined: SuccessRate;
+  finalOutcomeCounts: FinalOutcomeCounts;
+  graduatedDogsList: Dog[];
+}
+
+const NOT_WORKED_RECENTLY_DAYS = 14;
+
+function daysAgoIso(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString();
+}
+
+// Dogs still in progress (neither graduated nor released) never count toward
+// either side of this ratio — only a decided outcome moves the needle.
+function computeSuccessRate(dogs: Dog[]): SuccessRate {
+  const graduated = dogs.filter((d) => d.graduated).length;
+  const released = dogs.filter((d) => d.released).length;
+  const decided = graduated + released;
+  return {
+    percent: decided > 0 ? Math.round((graduated / decided) * 100) : null,
+    graduated,
+    released,
+  };
+}
+
+export function useTrainerHistoryStats(): TrainerHistoryStats {
+  const state = useDatabase();
+
+  return useMemo(() => {
+    const { dogs, reports, checklistItems, dogMilestoneCompletions, milestoneTemplates } = state;
+
+    const graduatedDogs = dogs.filter((d) => d.graduated).length;
+    const releasedDogs = dogs.filter((d) => d.released).length;
+    const activeDogs = dogs.filter((d) => !d.graduated && !d.released).length;
+
+    const successRateOverall = computeSuccessRate(dogs);
+    const successRateRefined = computeSuccessRate(dogs.filter((d) => !d.excludedFromStats));
+
+    // Only completions on milestones *currently* flagged isFinalOutcomeMilestone
+    // count — otherwise outcomes recorded against a since-unflagged milestone
+    // (e.g. the trainer re-pointed the flag at a different milestone) would
+    // keep polluting a bar the UI labels as "the" final-outcome milestone.
+    const finalOutcomeMilestoneIds = new Set(
+      milestoneTemplates.filter((m) => m.isFinalOutcomeMilestone).map((m) => m.id),
+    );
+    const finalOutcomeCounts = dogMilestoneCompletions.reduce<FinalOutcomeCounts>(
+      (acc, c) => {
+        if (!finalOutcomeMilestoneIds.has(c.milestoneTemplateId)) return acc;
+        if (c.outcome === 'Placement Ready') acc.placementReady += 1;
+        else if (c.outcome === 'Additional Objectives') acc.additionalObjectives += 1;
+        else if (c.outcome === 'Fail') acc.fail += 1;
+        return acc;
+      },
+      { placementReady: 0, additionalObjectives: 0, fail: 0, total: 0 },
+    );
+    finalOutcomeCounts.total =
+      finalOutcomeCounts.placementReady + finalOutcomeCounts.additionalObjectives + finalOutcomeCounts.fail;
+
+    const graduatedDogsList = dogs
+      .filter((d) => d.graduated)
+      .sort((a, b) => (b.graduatedDate ?? '').localeCompare(a.graduatedDate ?? ''));
+
+    const weekAgo = daysAgoIso(7);
+    const monthAgo = daysAgoIso(30);
+    const logsThisWeek = reports.filter((r) => r.createdDate >= weekAgo).length;
+    const logsThisMonth = reports.filter((r) => r.createdDate >= monthAgo).length;
+
+    const milestonesCompleted = dogMilestoneCompletions.filter((c) => c.completed).length;
+
+    const skillCounts = new Map<string, number>();
+    let skillsWorkedOnTotal = 0;
+    reports.forEach((r) => {
+      r.skillIds.forEach((id) => {
+        skillCounts.set(id, (skillCounts.get(id) ?? 0) + 1);
+        skillsWorkedOnTotal += 1;
+      });
+    });
+    const mostWorkedSkills: SkillWorkedCount[] = [...skillCounts.entries()]
+      .map(([checklistItemId, count]) => {
+        const item = checklistItems.find((i) => i.id === checklistItemId);
+        return item ? { checklistItemId, title: item.title, phase: item.phase, count } : null;
+      })
+      .filter((x): x is SkillWorkedCount => x !== null)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    const lastWorkedByDog = new Map<string, string>();
+    reports.forEach((r) => {
+      const existing = lastWorkedByDog.get(r.dogId);
+      if (!existing || r.createdDate > existing) lastWorkedByDog.set(r.dogId, r.createdDate);
+    });
+
+    const recentlyWorkedDogs: DogActivitySummary[] = [...lastWorkedByDog.entries()]
+      .map(([dogId, lastWorkedDate]) => {
+        const dog = dogs.find((d) => d.id === dogId);
+        return dog ? { dog, lastWorkedDate } : null;
+      })
+      .filter((x): x is { dog: Dog; lastWorkedDate: string } => x !== null)
+      .sort((a, b) => b.lastWorkedDate.localeCompare(a.lastWorkedDate))
+      .slice(0, 5);
+
+    const notWorkedCutoff = daysAgoIso(NOT_WORKED_RECENTLY_DAYS);
+    const dogsNotWorkedRecently: DogActivitySummary[] = dogs
+      .filter((d) => !d.released && !d.graduated)
+      .map((d) => ({ dog: d, lastWorkedDate: lastWorkedByDog.get(d.id) ?? null }))
+      .filter(({ lastWorkedDate }) => !lastWorkedDate || lastWorkedDate < notWorkedCutoff)
+      .sort((a, b) => (a.lastWorkedDate ?? '').localeCompare(b.lastWorkedDate ?? ''));
+
+    return {
+      totalDogs: dogs.length,
+      activeDogs,
+      graduatedDogs,
+      releasedDogs,
+      totalLogs: reports.length,
+      logsThisWeek,
+      logsThisMonth,
+      milestonesCompleted,
+      skillsWorkedOnTotal,
+      mostWorkedSkills,
+      recentlyWorkedDogs,
+      dogsNotWorkedRecently,
+      successRateOverall,
+      successRateRefined,
+      finalOutcomeCounts,
+      graduatedDogsList,
+    };
+  }, [state]);
 }

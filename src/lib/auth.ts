@@ -6,6 +6,7 @@ export interface Session {
   instructorId: string;
   name: string;
   profilePhotoUrl: string | null;
+  createdAt: string;
 }
 
 const SESSION_KEY = 'abbys-dog-chej:session';
@@ -64,6 +65,7 @@ export async function login(name: string, passcode: string): Promise<void> {
     instructorId: res.instructorId,
     name: res.name,
     profilePhotoUrl: res.profilePhotoUrl,
+    createdAt: res.createdAt,
   };
   persistSession();
   notify();
@@ -76,6 +78,7 @@ export async function createAccount(name: string, passcode: string): Promise<voi
     instructorId: res.instructorId,
     name: res.name,
     profilePhotoUrl: res.profilePhotoUrl,
+    createdAt: res.createdAt,
   };
   persistSession();
   notify();
@@ -87,6 +90,26 @@ export async function updateAccount(patch: {
 }): Promise<void> {
   const res = await api.updateAccount(patch);
   if (!session) return;
+  session = { ...session, name: res.name, profilePhotoUrl: res.profilePhotoUrl };
+  persistSession();
+  notify();
+}
+
+// A device's session only ever learns a name/photo change through login(),
+// createAccount(), or updateAccount() above — never automatically. So a
+// second device that's been signed in since before a change (e.g. a photo
+// uploaded from the phone) keeps showing stale name/photo indefinitely,
+// with no logout required to surface it, unless something calls this.
+// App.tsx does, once per session on load.
+export async function refreshAccount(): Promise<void> {
+  if (!session) return;
+  const token = session.token;
+  const res = await api.getAccount();
+  // A logout or account switch mid-request must not let a stale response
+  // overwrite whatever session is active now — mirrors the token check in
+  // api.ts's 401 handler and the generation guard in store.ts's
+  // hydrateFromServer.
+  if (!session || session.token !== token) return;
   session = { ...session, name: res.name, profilePhotoUrl: res.profilePhotoUrl };
   persistSession();
   notify();

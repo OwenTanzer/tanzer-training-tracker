@@ -14,10 +14,12 @@ import {
   renameFolder,
   reorderDogs,
   reorderFolders,
+  setPinnedFolder,
   useChildFolders,
   useDogsInFolder,
   useFolder,
   useFolders,
+  usePinnedFolderId,
 } from '../data/store';
 import type { Dog, Folder } from '../types';
 
@@ -28,6 +30,8 @@ export function FolderView() {
   const allFolders = useFolders();
   const childFolders = useChildFolders(folderId);
   const dogs = useDogsInFolder(folderId ?? '');
+  const pinnedFolderId = usePinnedFolderId();
+  const isPinned = !!folder && pinnedFolderId === folder.id;
   const [newFolderName, setNewFolderName] = useState('');
   const [newDogName, setNewDogName] = useState('');
   const [renamingSelf, setRenamingSelf] = useState(false);
@@ -70,7 +74,7 @@ export function FolderView() {
       alert(result.reason);
       return;
     }
-    navigate(folder.parentFolderId ? `/folder/${folder.parentFolderId}` : '/');
+    navigate(folder.parentFolderId ? `/folder/${folder.parentFolderId}` : '/folders');
   }
 
   return (
@@ -94,6 +98,17 @@ export function FolderView() {
           </h1>
           {folder && (
             <div className="flex gap-0.5">
+              <button
+                title={isPinned ? 'Unpin this folder from Trainer History' : 'Pin this folder to Trainer History'}
+                onClick={() => setPinnedFolder(isPinned ? null : folder.id)}
+                className={`rounded p-1.5 ${
+                  isPinned
+                    ? 'text-sky-500 hover:bg-sky-50 dark:hover:bg-sky-950'
+                    : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                }`}
+              >
+                📌
+              </button>
               <button
                 title="Rename this folder"
                 onClick={() => {

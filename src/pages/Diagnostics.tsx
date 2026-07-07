@@ -132,7 +132,7 @@ export function Diagnostics() {
         <p>
           Skills: {counts.checklistItems} · Completions: {counts.completions} · Milestone
           templates: {counts.milestoneTemplates} · Milestone completions:{' '}
-          {counts.dogMilestoneCompletions}
+          {counts.dogMilestoneCompletions} · Distraction templates: {counts.distractionTemplates}
         </p>
         <p>Stored data size: {counts.storageBytes.toLocaleString()} bytes</p>
       </section>
