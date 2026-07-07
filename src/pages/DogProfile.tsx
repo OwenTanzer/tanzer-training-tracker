@@ -513,8 +513,13 @@ export function DogProfile() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => toggleReportRedFlag(r.id)}
-                      className={r.redFlag ? 'text-red-500' : 'text-gray-300'}
+                      aria-pressed={r.redFlag}
                       title="Toggle red flag"
+                      className={`flex h-7 w-7 items-center justify-center rounded-full text-sm transition-all duration-150 active:scale-90 ${
+                        r.redFlag
+                          ? 'bg-red-100 ring-1 ring-red-400 dark:bg-red-950'
+                          : 'bg-gray-100 opacity-40 grayscale hover:opacity-70 dark:bg-gray-800'
+                      }`}
                     >
                       🚩
                     </button>
