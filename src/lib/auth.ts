@@ -6,6 +6,7 @@ export interface Session {
   instructorId: string;
   name: string;
   profilePhotoUrl: string | null;
+  createdAt: string;
 }
 
 const SESSION_KEY = 'abbys-dog-chej:session';
@@ -64,6 +65,7 @@ export async function login(name: string, passcode: string): Promise<void> {
     instructorId: res.instructorId,
     name: res.name,
     profilePhotoUrl: res.profilePhotoUrl,
+    createdAt: res.createdAt,
   };
   persistSession();
   notify();
@@ -76,6 +78,7 @@ export async function createAccount(name: string, passcode: string): Promise<voi
     instructorId: res.instructorId,
     name: res.name,
     profilePhotoUrl: res.profilePhotoUrl,
+    createdAt: res.createdAt,
   };
   persistSession();
   notify();

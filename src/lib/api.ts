@@ -104,6 +104,7 @@ export interface AccountResponse {
   instructorId: string;
   name: string;
   profilePhotoUrl: string | null;
+  createdAt: string;
 }
 
 export function createInstructor(name: string, passcode: string): Promise<AccountResponse> {

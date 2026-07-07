@@ -104,7 +104,12 @@ async function handleCreateInstructor(request: Request, env: Env): Promise<Respo
     .bind(token, id, now, sessionExpiry())
     .run();
 
-  return json(request, env, { token, instructorId: id, name, profilePhotoUrl: null, updatedAt: now }, 201);
+  return json(
+    request,
+    env,
+    { token, instructorId: id, name, profilePhotoUrl: null, createdAt: now, updatedAt: now },
+    201,
+  );
 }
 
 async function handleLogin(request: Request, env: Env): Promise<Response> {
@@ -114,10 +119,16 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
   if (!name || !passcode) return errorResponse(request, env, 'name and passcode are required', 400);
 
   const instructor = await env.DB.prepare(
-    'SELECT id, passcode_hash, passcode_salt, profile_photo_key FROM instructors WHERE name = ? COLLATE NOCASE',
+    'SELECT id, passcode_hash, passcode_salt, profile_photo_key, created_at FROM instructors WHERE name = ? COLLATE NOCASE',
   )
     .bind(name)
-    .first<{ id: string; passcode_hash: string; passcode_salt: string; profile_photo_key: string | null }>();
+    .first<{
+      id: string;
+      passcode_hash: string;
+      passcode_salt: string;
+      profile_photo_key: string | null;
+      created_at: string;
+    }>();
   if (!instructor) return errorResponse(request, env, 'Instructor not found', 404);
 
   const valid = await verifyPasscode(passcode, instructor.passcode_salt, instructor.passcode_hash);
@@ -139,6 +150,7 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
       instructorId: instructor.id,
       name,
       profilePhotoUrl: photoUrlForKey(request, instructor.profile_photo_key),
+      createdAt: instructor.created_at,
     },
     200,
   );
