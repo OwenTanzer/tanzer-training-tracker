@@ -12,7 +12,6 @@ import {
   resetLocalStore,
   seedDefaultTemplatesIfEmpty,
   useHydrated,
-  useLegacyImportAvailable,
   useSyncStatus,
 } from './data/store';
 import type { Database } from './data/db';
@@ -31,7 +30,6 @@ function App() {
   const session = useSession();
   const hydrated = useHydrated();
   const syncStatus = useSyncStatus();
-  const legacyImportAvailable = useLegacyImportAvailable();
   const [hydrateError, setHydrateError] = useState<string | null>(null);
   const [legacyImport, setLegacyImport] = useState<Database | null>(null);
   const [importing, setImporting] = useState(false);
@@ -201,15 +199,6 @@ function App() {
           </Link>
           <Link to="/red-flags" className="text-sm text-red-500 hover:underline">
             🚩 Red Flags
-          </Link>
-          <Link to="/diagnostics" className="text-sm text-gray-500 hover:underline">
-            🩺 Diagnostics
-            {legacyImportAvailable && (
-              <span
-                title="There's data from before accounts existed you can still import"
-                className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-500 align-middle"
-              />
-            )}
           </Link>
           {syncStatus === 'error' && (
             <span title="Some changes may not be saved to the server yet" className="text-xs text-amber-500">
