@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Route, Routes } from 'react-router-dom';
 import { LoadingScreen } from './components/LoadingScreen';
 import { ThemeToggle } from './components/ThemeToggle';
-import { logout, useSession } from './lib/auth';
+import { logout, refreshAccount, useSession } from './lib/auth';
 import {
   declineLegacyImport,
   getImportableLegacyDatabase,
@@ -68,6 +68,18 @@ function App() {
       cancelled = true;
     };
   }, [session]);
+
+  // Keyed on instructorId rather than the whole session object — refreshAccount()
+  // itself reassigns session (a new object) once it applies, and depending on
+  // the whole object here would re-trigger this same effect on every refresh.
+  useEffect(() => {
+    if (!session) return;
+    refreshAccount().catch(() => {
+      // Best-effort background refresh — a stale local name/photo isn't
+      // worth surfacing an error over; the data hydrate above already
+      // reports real connectivity problems.
+    });
+  }, [session?.instructorId]);
 
   function handleImportLegacy() {
     if (!legacyImport) return;

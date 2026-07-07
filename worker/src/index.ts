@@ -223,6 +223,27 @@ async function handleUploadPhoto(request: Request, env: Env): Promise<Response> 
   return json(request, env, { url: photoUrlForKey(request, key), key }, 201);
 }
 
+// Lets an already-signed-in device (e.g. a laptop with a session from
+// before a photo/name change on the phone) pick up the current name/photo
+// without forcing a logout+login — see the login/create/PATCH handlers
+// above for where those fields actually get written.
+async function handleGetAccount(request: Request, env: Env): Promise<Response> {
+  const auth = await requireAuth(request, env);
+  if (auth instanceof Response) return auth;
+
+  const row = await env.DB.prepare('SELECT name, profile_photo_key FROM instructors WHERE id = ?')
+    .bind(auth)
+    .first<{ name: string; profile_photo_key: string | null }>();
+  if (!row) return errorResponse(request, env, 'Instructor not found', 404);
+
+  return json(
+    request,
+    env,
+    { instructorId: auth, name: row.name, profilePhotoUrl: photoUrlForKey(request, row.profile_photo_key) },
+    200,
+  );
+}
+
 async function handleUpdateAccount(request: Request, env: Env): Promise<Response> {
   const auth = await requireAuth(request, env);
   if (auth instanceof Response) return auth;
@@ -325,6 +346,9 @@ export default {
       }
       if (pathname === '/api/photos' && method === 'POST') {
         return await handleUploadPhoto(request, env);
+      }
+      if (pathname === '/api/account' && method === 'GET') {
+        return await handleGetAccount(request, env);
       }
       if (pathname === '/api/account' && method === 'PATCH') {
         return await handleUpdateAccount(request, env);

@@ -132,6 +132,13 @@ export function updateAccount(patch: {
   return request('/api/account', { method: 'PATCH', body: patch });
 }
 
+// Lets an already-signed-in device pick up a name/photo change made from
+// another device without forcing a logout+login — see auth.ts's
+// refreshAccount().
+export function getAccount(): Promise<AccountUpdateResponse> {
+  return request('/api/account', { method: 'GET' });
+}
+
 export interface DataResponse {
   blob: unknown;
   updatedAt: string;
