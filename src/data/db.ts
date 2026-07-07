@@ -21,6 +21,13 @@ export interface Database {
   completions: DogChecklistCompletion[];
   milestoneTemplates: MilestoneTemplate[];
   dogMilestoneCompletions: DogMilestoneCompletion[];
+  // One-time gate for migrateLegacyDefaultTemplates() (#30) — true means this
+  // account's checklist/milestones either started on, or have already been
+  // upgraded to, Abby's real defaults, so the migration must never touch them
+  // again. Without this, any edit made after a migration run would look
+  // "different from Abby's defaults" and get silently overwritten on the next
+  // login.
+  templatesMigratedToAbbyDefaults: boolean;
 }
 
 const STORAGE_KEY = 'abbys-dog-chej:db:v1';
@@ -35,6 +42,7 @@ export function emptyDatabase(): Database {
     completions: [],
     milestoneTemplates: buildDefaultMilestones(),
     dogMilestoneCompletions: [],
+    templatesMigratedToAbbyDefaults: true,
   };
 }
 
@@ -154,6 +162,10 @@ export function normalizeDatabase(parsed: Record<string, unknown>): Database {
     database.dogs = backfillDogs(database.dogs ?? []);
     database.reports = backfillReports(database.reports ?? []);
     database.completions = backfillCompletions(database.completions ?? []);
+    // Accounts persisted before #30 won't have this field at all — treat its
+    // absence as "not yet migrated" so migrateLegacyDefaultTemplates() runs
+    // for them exactly once.
+    database.templatesMigratedToAbbyDefaults = database.templatesMigratedToAbbyDefaults ?? false;
     return database;
   }
 
@@ -174,6 +186,7 @@ export function normalizeDatabase(parsed: Record<string, unknown>): Database {
         ? migrated.milestoneTemplates
         : buildDefaultMilestones(),
     dogMilestoneCompletions: migrated.dogMilestoneCompletions,
+    templatesMigratedToAbbyDefaults: (parsed.templatesMigratedToAbbyDefaults as boolean | undefined) ?? false,
   };
   return database;
 }
