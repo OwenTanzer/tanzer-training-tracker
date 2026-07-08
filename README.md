@@ -35,6 +35,10 @@ npm run preview   # preview a production build locally
 
 ## Deployment
 
-Pushing to `main` builds the app and deploys it to GitHub Pages via
-`.github/workflows/deploy.yml`. Enable Pages for this repo under
-Settings → Pages → Source: GitHub Actions.
+Pushing to `main` builds the frontend and deploys it as a Cloudflare Worker
+(static assets) via `.github/workflows/deploy-frontend.yml`, served at
+https://tanzer.systems/trainingtracker via a Worker route on the
+`tanzer.systems` zone. The backend API worker deploys separately via
+`.github/workflows/deploy-worker.yml`. Both require a `CLOUDFLARE_API_TOKEN`
+repository secret; the frontend deploy additionally needs that token to have
+permission to edit Worker routes on the `tanzer.systems` zone.

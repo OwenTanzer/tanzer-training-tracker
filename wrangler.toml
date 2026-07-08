@@ -1,0 +1,19 @@
+name = "tanzer-training-tracker"
+main = "spa-worker.ts"
+compatibility_date = "2026-07-01"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+# Default "auto-trailing-slash" 307-redirects a direct index.html request to
+# its directory path, which would strip the client-side route off deep links
+# (e.g. /trainingtracker/dog/123) when spa-worker.ts falls back to it.
+html_handling = "none"
+
+[[routes]]
+pattern = "tanzer.systems/trainingtracker"
+zone_name = "tanzer.systems"
+
+[[routes]]
+pattern = "tanzer.systems/trainingtracker/*"
+zone_name = "tanzer.systems"

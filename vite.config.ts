@@ -14,7 +14,12 @@ function commitSha(): string {
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: process.env.NODE_ENV === 'production' ? '/tanzer-training-tracker/' : '/',
+  base: process.env.NODE_ENV === 'production' ? '/trainingtracker/' : '/',
+  build: {
+    // Nested so the built files live at the same path the Cloudflare Worker
+    // route (tanzer.systems/trainingtracker/*) receives them at.
+    outDir: 'dist/trainingtracker',
+  },
   plugins: [react(), tailwindcss()],
   define: {
     __APP_COMMIT_SHA__: JSON.stringify(commitSha()),

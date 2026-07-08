@@ -13,4 +13,4 @@ bucket_name = "abbys-dog-chej-photos"
 
 [vars]
 # Comma-separated list of frontend origins allowed to call this API.
-ALLOWED_ORIGINS = "https://owentanzer.github.io,http://localhost:5173"
+ALLOWED_ORIGINS = "https://tanzer.systems,http://localhost:5173"
