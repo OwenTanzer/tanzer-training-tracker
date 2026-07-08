@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react';
-import { GuideDogIllustration, randomGuideDogCoat } from './GuideDogIllustration';
+import { GuideDogIllustration, type GuideDogCoat } from './GuideDogIllustration';
 
 const DURATION_MS = 1800;
 
-export function LoadingScreen({ onFinish }: { onFinish: () => void }) {
+export function LoadingScreen({
+  coat,
+  onFinish,
+}: {
+  coat: GuideDogCoat;
+  onFinish: () => void;
+}) {
   const [fadingOut, setFadingOut] = useState(false);
-  const [coat] = useState(randomGuideDogCoat);
 
   useEffect(() => {
     const fadeTimer = setTimeout(() => setFadingOut(true), DURATION_MS - 300);

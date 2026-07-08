@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, Route, Routes } from 'react-router-dom';
 import { LoadingScreen } from './components/LoadingScreen';
+import { randomGuideDogCoat } from './components/GuideDogIllustration';
 import { logout, refreshAccount, useSession } from './lib/auth';
 import {
   declineLegacyImport,
@@ -30,6 +31,10 @@ const LANDING_SEEN_KEY = 'ttt:landing-seen';
 
 function App() {
   const [splashDone, setSplashDone] = useState(false);
+  // Rolled once per app load and shared by the loading screen and the login
+  // screen, so the dog that walks in during splash is the same dog waiting
+  // on the login form — not a fresh, unrelated roll.
+  const [coat] = useState(randomGuideDogCoat);
   // sessionStorage, not localStorage — the landing page should greet a fresh
   // tab/session, not disappear forever after the very first visit.
   const [landingDone, setLandingDone] = useState(
@@ -121,11 +126,11 @@ function App() {
   }
 
   if (!splashDone) {
-    return <LoadingScreen onFinish={() => setSplashDone(true)} />;
+    return <LoadingScreen coat={coat} onFinish={() => setSplashDone(true)} />;
   }
 
   if (!session) {
-    return <Login />;
+    return <Login coat={coat} />;
   }
 
   if (hydrateError) {
