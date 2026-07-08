@@ -9,7 +9,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 if (!API_BASE_URL) {
   const message =
     'VITE_API_BASE_URL is not set — the app has no API to talk to. Set it in ' +
-    '.env.local for local dev, or as a build-time env var in deploy.yml for production.';
+    '.env.local for local dev, or as a build-time env var in deploy-frontend.yml for production.';
   console.error(message);
   throw new Error(message);
 }

@@ -5,8 +5,8 @@ profile, log training reports, and track progress toward graduation.
 
 Design doc: https://app.notion.com/p/Abby-s-Dog-Notes-Project-3933c519147b81c1b582c85c92ec3baa?source=copy_link
 
-This is the web proof-of-concept. It runs entirely in the browser and stores
-data in `localStorage` — no backend yet. The final product is planned as an
+This is the web proof-of-concept. The frontend talks to a Cloudflare Worker
+API backed by D1 and R2 (see `worker/`). The final product is planned as an
 offline-first on-device phone app; this POC exists to validate the workflow,
 data model, and UI first.
 
