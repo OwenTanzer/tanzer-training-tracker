@@ -8,12 +8,12 @@
       // https://github.com/rafgraph/spa-github-pages
       //
       // GitHub Pages has no server-side rewrite rule, so a hard refresh or
-      // direct link to a client-side route (e.g. /Abbys-dog-chej/dog/123)
+      // direct link to a client-side route (e.g. /tanzer-training-tracker/dog/123)
       // has no matching static file and 404s here instead. This encodes the
       // real path into a query string and redirects to the app's root,
       // where the script in index.html decodes it back before React Router
       // ever sees the URL.
-      var pathSegmentsToKeep = 1; // keep "/Abbys-dog-chej"
+      var pathSegmentsToKeep = 1; // keep "/tanzer-training-tracker"
 
       var l = window.location;
       l.replace(

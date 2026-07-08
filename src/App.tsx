@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, Route, Routes } from 'react-router-dom';
 import { LoadingScreen } from './components/LoadingScreen';
+import { randomGuideDogCoat } from './components/GuideDogIllustration';
 import { logout, refreshAccount, useSession } from './lib/auth';
 import {
   declineLegacyImport,
@@ -18,6 +19,7 @@ import { AccountSettings } from './pages/AccountSettings';
 import { Diagnostics } from './pages/Diagnostics';
 import { DogProfile } from './pages/DogProfile';
 import { FolderView } from './pages/FolderView';
+import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
 import { ManageTemplates } from './pages/ManageTemplates';
 import { NewReport } from './pages/NewReport';
@@ -25,8 +27,19 @@ import { RedFlags } from './pages/RedFlags';
 import { Settings } from './pages/Settings';
 import { TrainerHistory } from './pages/TrainerHistory';
 
+const LANDING_SEEN_KEY = 'ttt:landing-seen';
+
 function App() {
   const [splashDone, setSplashDone] = useState(false);
+  // Rolled once per app load and shared by the loading screen and the login
+  // screen, so the dog that walks in during splash is the same dog waiting
+  // on the login form — not a fresh, unrelated roll.
+  const [coat] = useState(randomGuideDogCoat);
+  // sessionStorage, not localStorage — the landing page should greet a fresh
+  // tab/session, not disappear forever after the very first visit.
+  const [landingDone, setLandingDone] = useState(
+    () => sessionStorage.getItem(LANDING_SEEN_KEY) === '1',
+  );
   const session = useSession();
   const hydrated = useHydrated();
   const syncStatus = useSyncStatus();
@@ -113,11 +126,11 @@ function App() {
   }
 
   if (!splashDone) {
-    return <LoadingScreen onFinish={() => setSplashDone(true)} />;
+    return <LoadingScreen coat={coat} onFinish={() => setSplashDone(true)} />;
   }
 
   if (!session) {
-    return <Login />;
+    return <Login coat={coat} />;
   }
 
   if (hydrateError) {
@@ -181,6 +194,17 @@ function App() {
           Not ready yet? You can pick this back up later from the Diagnostics page.
         </p>
       </div>
+    );
+  }
+
+  if (!landingDone) {
+    return (
+      <Landing
+        onContinue={() => {
+          sessionStorage.setItem(LANDING_SEEN_KEY, '1');
+          setLandingDone(true);
+        }}
+      />
     );
   }
 

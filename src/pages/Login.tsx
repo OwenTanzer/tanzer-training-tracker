@@ -1,8 +1,9 @@
 import { useState } from 'react';
+import { GuideDogIllustration, type GuideDogCoat } from '../components/GuideDogIllustration';
 import { ApiError } from '../lib/api';
 import { createAccount, login } from '../lib/auth';
 
-export function Login() {
+export function Login({ coat }: { coat: GuideDogCoat }) {
   const [mode, setMode] = useState<'login' | 'create'>('login');
   const [name, setName] = useState('');
   const [passcode, setPasscode] = useState('');
@@ -30,7 +31,7 @@ export function Login() {
     <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-900 p-4">
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center space-y-1">
-          <p className="text-3xl">🐕</p>
+          <GuideDogIllustration coat={coat} className="mx-auto h-12 w-16" />
           <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
             Tanzer Training Tracker
           </h1>
