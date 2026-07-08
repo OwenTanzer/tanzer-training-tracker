@@ -759,6 +759,10 @@ export function DogProfile() {
             Creates a copy of {dog.name} on another instructor's page, marked as a pass-back to
             them — {dog.name}'s own record here is unaffected.
           </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Shared training history will appear for the receiving instructor; private
+            red-flagged logs will not.
+          </p>
           <input
             autoFocus
             value={transferName}
@@ -773,7 +777,7 @@ export function DogProfile() {
               disabled={transferBusy || !transferName.trim()}
               className="rounded-md bg-sky-500 px-3 py-1 font-medium text-white hover:bg-sky-600 disabled:opacity-50"
             >
-              {transferBusy ? 'Transferring…' : 'Transfer'}
+              {transferBusy ? 'Creating…' : 'Create linked copy'}
             </button>
             <button
               type="button"
@@ -1115,8 +1119,12 @@ export function DogProfile() {
       {dog.passBackSource && sharedReports.length > 0 && (
         <section className="space-y-2">
           <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
-            Shared History from {dog.passBackSource.instructorName}
+            Read-only Shared History from {dog.passBackSource.instructorName}
           </h2>
+          <p className="text-xs text-gray-400">
+            These are {dog.passBackSource.instructorName}'s own logs, shown for context — they
+            can't be edited here, and update after a refresh/reload rather than instantly.
+          </p>
           <ul className="space-y-2">
             {sharedReports.map((r) => (
               <li
