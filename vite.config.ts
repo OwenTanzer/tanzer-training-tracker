@@ -14,7 +14,7 @@ function commitSha(): string {
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: process.env.NODE_ENV === 'production' ? '/Abbys-dog-chej/' : '/',
+  base: process.env.NODE_ENV === 'production' ? '/tanzer-training-tracker/' : '/',
   plugins: [react(), tailwindcss()],
   define: {
     __APP_COMMIT_SHA__: JSON.stringify(commitSha()),
