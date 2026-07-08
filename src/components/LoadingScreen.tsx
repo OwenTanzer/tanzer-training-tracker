@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { GuideDogIllustration, randomGuideDogCoat } from './GuideDogIllustration';
 
 const DURATION_MS = 1800;
 
 export function LoadingScreen({ onFinish }: { onFinish: () => void }) {
   const [fadingOut, setFadingOut] = useState(false);
+  const [coat] = useState(randomGuideDogCoat);
 
   useEffect(() => {
     const fadeTimer = setTimeout(() => setFadingOut(true), DURATION_MS - 300);
@@ -23,7 +25,10 @@ export function LoadingScreen({ onFinish }: { onFinish: () => void }) {
       <div className="relative h-24 w-64 overflow-hidden">
         <div className="absolute bottom-2 left-0 h-0.5 w-full bg-gray-300 dark:bg-gray-700" />
         <span className="absolute bottom-2 right-3 h-10 w-0.5 bg-gray-300 dark:bg-gray-700" />
-        <span className="absolute bottom-2 text-4xl animate-walk-to-curb">🐕‍🦺</span>
+        <GuideDogIllustration
+          coat={coat}
+          className="absolute bottom-2 h-10 w-14 animate-walk-to-curb"
+        />
       </div>
       <p className="text-sm text-gray-500 dark:text-gray-400">Tanzer Training Tracker</p>
     </div>
