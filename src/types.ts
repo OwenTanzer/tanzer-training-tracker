@@ -194,6 +194,13 @@ export interface MilestoneTemplate {
   // milestone gets an outcome picker (Placement Ready / Additional
   // Objectives / Fail) on the dog profile instead of a plain checkbox.
   isFinalOutcomeMilestone: boolean;
+  // Only meaningful alongside isFinalOutcomeMilestone (#33): most milestones
+  // are a one-time decision, overwritten in place if corrected — a plain
+  // checkbox/select. A repeatable one (the final test itself, traffic
+  // training) instead accumulates a MilestoneOutcomeAttempt each time it's
+  // recorded, so a dog that fails once and passes on a retake keeps both in
+  // its history instead of losing the failed attempt.
+  repeatable: boolean;
   createdDate: string;
   updatedDate: string;
 }
@@ -217,6 +224,33 @@ export interface DogMilestoneCompletion {
   // Only meaningful for a completion of a milestone flagged
   // isFinalOutcomeMilestone. 'Fail' auto-releases the dog; the other two
   // outcomes never have a side effect beyond recording the result and (for
-  // Placement Ready) completing the milestone itself.
+  // Placement Ready) completing the milestone itself. Always mirrors the
+  // *latest* MilestoneOutcomeAttempt for a repeatable milestone (#33) — this
+  // is deliberately still the single field every other reader (graduation
+  // progress, Trainer History's stats) uses, so "current outcome" behavior
+  // is identical whether or not the milestone happens to be repeatable.
   outcome: FinalOutcome | null;
+}
+
+// One historical decision on a repeatable final-outcome milestone (#33) — an
+// append-only event, never mutated or overwritten. Only ever created by
+// recordMilestoneOutcomeAttempt (src/data/store.ts); a plain, non-repeatable
+// milestone never produces any of these; DogMilestoneCompletion.outcome
+// stays the single source of truth those readers use, mirrored to match
+// whatever this ledger's latest row says.
+export interface MilestoneOutcomeAttempt {
+  id: string;
+  dogId: string;
+  milestoneTemplateId: string;
+  outcome: FinalOutcome;
+  attemptDate: string;
+  // True only for the one-time row created when a milestone already had a
+  // decided-but-unrepeated outcome at the moment it was flipped to
+  // repeatable (see toggleMilestoneRepeatable) — the pre-ledger schema only
+  // ever recorded a completion date for a Placement Ready outcome, so a
+  // migrated Additional Objectives/Fail row has no real historical date and
+  // this flag tells the UI to say so rather than presenting attemptDate as
+  // fact.
+  migratedFromLegacyCompletion: boolean;
+  notes: string | null;
 }

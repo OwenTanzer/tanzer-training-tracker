@@ -7,10 +7,12 @@ import { ProgressBar } from '../components/ProgressBar';
 import { uploadPhoto } from '../lib/api';
 import {
   deleteDog,
+  deleteMostRecentMilestoneAttempt,
   deleteReport,
   markDogGraduated,
   moveDog,
   reactivateDog,
+  recordMilestoneOutcomeAttempt,
   releaseDog,
   removeDogGraduatedStatus,
   setMilestoneOutcome,
@@ -32,6 +34,7 @@ import {
   useDogWorkedToday,
   useFolder,
   useLocations,
+  useMilestoneAttempts,
   useMilestoneTemplates,
   useReportsForDog,
   useSharedReportsForDog,
@@ -42,8 +45,10 @@ import {
   PHASES,
   type DistractionSeverity,
   type DistractionTemplate,
+  type DogMilestoneCompletion,
   type FinalOutcome,
   type Location,
+  type MilestoneTemplate,
   type Phase,
   type TrainingReport,
 } from '../types';
@@ -229,6 +234,142 @@ function EditReportForm({
         </button>
       </div>
     </form>
+  );
+}
+
+// A repeatable final-outcome milestone (#33) renders as read-only current
+// state plus a history and an explicit "Record Attempt" action, not a
+// <select> — a select communicates "change this value," which is the wrong
+// metaphor for an append-only historical event (and is silently broken for
+// the most common retry case: picking the same outcome again, e.g. Fail
+// after Fail, wouldn't fire a change event at all). Its own component
+// because useMilestoneAttempts is a hook and this renders inside a .map().
+function RepeatableMilestoneOutcome({
+  dogId,
+  dogName,
+  milestone,
+  completion,
+}: {
+  dogId: string;
+  dogName: string;
+  milestone: MilestoneTemplate;
+  completion: DogMilestoneCompletion | undefined;
+}) {
+  const attempts = useMilestoneAttempts(dogId, milestone.id);
+  const [recording, setRecording] = useState(false);
+  const [outcome, setOutcome] = useState<FinalOutcome>('Placement Ready');
+  const [notes, setNotes] = useState('');
+
+  function handleRecord(e: React.FormEvent) {
+    e.preventDefault();
+    if (
+      outcome === 'Fail' &&
+      !confirm(
+        `Mark ${dogName} as Failed on this evaluation? This automatically releases them from training.`,
+      )
+    ) {
+      return;
+    }
+    recordMilestoneOutcomeAttempt(dogId, milestone.id, outcome, notes.trim() || null);
+    setRecording(false);
+    setNotes('');
+    setOutcome('Placement Ready');
+  }
+
+  function handleUndo() {
+    if (!confirm('Remove the most recent attempt for this milestone? This cannot be undone.')) {
+      return;
+    }
+    deleteMostRecentMilestoneAttempt(dogId, milestone.id);
+  }
+
+  return (
+    <li className="rounded-lg border border-gray-200 dark:border-gray-700 p-2 space-y-1.5">
+      <div className="flex items-center justify-between gap-2 text-sm">
+        <span className="font-medium text-gray-800 dark:text-gray-200">{milestone.title}</span>
+        <span className="text-xs text-gray-400" title="Each recorded outcome adds to this milestone's history instead of overwriting the last decision">
+          🔁 Repeatable
+        </span>
+      </div>
+      {completion?.outcome ? (
+        <span className={`text-xs font-medium ${OUTCOME_STYLES[completion.outcome]}`}>
+          {OUTCOME_ICONS[completion.outcome]} Current: {completion.outcome}
+        </span>
+      ) : (
+        <span className="text-xs text-gray-400">No attempts yet</span>
+      )}
+      {attempts.length > 0 && (
+        <ul className="space-y-0.5 text-xs text-gray-500">
+          {attempts.map((a) => (
+            <li key={a.id}>
+              {OUTCOME_ICONS[a.outcome]} {a.outcome} —{' '}
+              {a.migratedFromLegacyCompletion
+                ? 'date unknown (migrated)'
+                : new Date(a.attemptDate).toLocaleDateString()}
+              {a.notes && <> — {a.notes}</>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setRecording(true)}
+          className="rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs font-medium hover:bg-gray-50 dark:hover:bg-gray-800"
+        >
+          + Record Attempt
+        </button>
+        {attempts.length > 0 && (
+          <button
+            type="button"
+            onClick={handleUndo}
+            className="rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
+          >
+            Undo last attempt
+          </button>
+        )}
+      </div>
+      {recording && (
+        <form
+          onSubmit={handleRecord}
+          className="space-y-1.5 rounded-md border border-sky-300 dark:border-sky-700 p-2"
+        >
+          <select
+            value={outcome}
+            onChange={(e) => setOutcome(e.target.value as FinalOutcome)}
+            className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-sm"
+          >
+            {FINAL_OUTCOMES.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Notes (optional)"
+            rows={2}
+            className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-sm"
+          />
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              className="rounded-md bg-sky-500 px-3 py-1 text-xs font-medium text-white hover:bg-sky-600"
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={() => setRecording(false)}
+              className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1 text-xs hover:bg-gray-50 dark:hover:bg-gray-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </li>
   );
 }
 
@@ -743,6 +884,17 @@ export function DogProfile() {
         <ul className="space-y-1">
           {milestones.map((m) => {
             const completion = milestoneCompletions.find((c) => c.milestoneTemplateId === m.id);
+            if (m.isFinalOutcomeMilestone && m.repeatable) {
+              return (
+                <RepeatableMilestoneOutcome
+                  key={m.id}
+                  dogId={dog.id}
+                  dogName={dog.name}
+                  milestone={m}
+                  completion={completion}
+                />
+              );
+            }
             if (m.isFinalOutcomeMilestone) {
               return (
                 <li

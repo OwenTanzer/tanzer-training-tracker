@@ -43,6 +43,9 @@ export function buildDefaultMilestones(): MilestoneTemplate[] {
     // decides whether a dog is placement-ready, needs additional
     // objectives, or is released. See MilestoneTemplate.isFinalOutcomeMilestone.
     isFinalOutcomeMilestone: seed.title === 'Advanced Final Blindfold',
+    // #33 names these two as the milestones that need to be retakeable —
+    // the final evaluation itself, and traffic training at any phase.
+    repeatable: seed.title === 'Advanced Final Blindfold' || seed.title.startsWith('Traffic Training'),
     createdDate: now,
     updatedDate: now,
   }));

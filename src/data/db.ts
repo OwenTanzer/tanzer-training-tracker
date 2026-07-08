@@ -5,6 +5,7 @@ import type {
   DistractionTemplate,
   Folder,
   Location,
+  MilestoneOutcomeAttempt,
   MilestoneTemplate,
   Phase,
   PhaseChecklistItem,
@@ -22,6 +23,10 @@ export interface Database {
   completions: DogChecklistCompletion[];
   milestoneTemplates: MilestoneTemplate[];
   dogMilestoneCompletions: DogMilestoneCompletion[];
+  // Append-only history of decisions on repeatable final-outcome milestones
+  // (#33) — see MilestoneOutcomeAttempt's own comment. Empty for accounts
+  // that have never flagged a milestone repeatable.
+  milestoneOutcomeAttempts: MilestoneOutcomeAttempt[];
   distractionTemplates: DistractionTemplate[];
   // One-time gate for migrateLegacyDefaultTemplates() (#30) — true means this
   // account's checklist/milestones either started on, or have already been
@@ -48,6 +53,7 @@ export function emptyDatabase(): Database {
     completions: [],
     milestoneTemplates: buildDefaultMilestones(),
     dogMilestoneCompletions: [],
+    milestoneOutcomeAttempts: [],
     distractionTemplates: [],
     templatesMigratedToAbbyDefaults: true,
     pinnedFolderId: null,
@@ -93,6 +99,7 @@ function migrateLegacyMilestones(legacy: LegacyMilestone[]): {
           title: m.title,
           sortOrder: milestoneTemplates.length,
           isFinalOutcomeMilestone: false,
+          repeatable: false,
           createdDate: m.createdDate,
           updatedDate: m.updatedDate,
         });
@@ -149,11 +156,13 @@ function backfillDogs(dogs: Dog[]): Dog[] {
   );
 }
 
-// Templates predating the final-outcome flag won't have it stored.
+// Templates predating the final-outcome flag, or the repeatable flag (#33),
+// won't have those stored.
 function backfillMilestoneTemplates(templates: MilestoneTemplate[]): MilestoneTemplate[] {
   return templates.map((template) => ({
     ...template,
     isFinalOutcomeMilestone: template.isFinalOutcomeMilestone ?? false,
+    repeatable: template.repeatable ?? false,
   }));
 }
 
@@ -218,6 +227,12 @@ export function normalizeDatabase(
     database.dogMilestoneCompletions = backfillDogMilestoneCompletions(
       database.dogMilestoneCompletions ?? [],
     );
+    // Accounts predating repeatable milestones (#33) won't have this field
+    // at all — no migration needed here, since a milestone can only ever
+    // have accumulated ledger rows after being flagged repeatable, which
+    // this same normalizeDatabase pass also defaults to false for every
+    // template that predates the flag.
+    database.milestoneOutcomeAttempts = database.milestoneOutcomeAttempts ?? [];
     // Accounts predating distraction templates (#36) won't have this field at all.
     database.distractionTemplates = database.distractionTemplates ?? [];
     // Accounts persisted before #30 won't have this field at all — treat its
@@ -246,6 +261,8 @@ export function normalizeDatabase(
         ? migrated.milestoneTemplates
         : buildDefaultMilestones(),
     dogMilestoneCompletions: migrated.dogMilestoneCompletions,
+    milestoneOutcomeAttempts:
+      (parsed.milestoneOutcomeAttempts as MilestoneOutcomeAttempt[]) ?? [],
     distractionTemplates: (parsed.distractionTemplates as DistractionTemplate[]) ?? [],
     templatesMigratedToAbbyDefaults: (parsed.templatesMigratedToAbbyDefaults as boolean | undefined) ?? false,
     pinnedFolderId: (parsed.pinnedFolderId as string | null | undefined) ?? null,

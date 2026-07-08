@@ -318,8 +318,15 @@ export function TrainerHistory() {
         <FinalOutcomeBar counts={stats.finalOutcomeCounts} />
         <p className="text-xs text-gray-400">
           From the milestone flagged as the final outcome (e.g. Advanced Final Blindfold) in
-          Manage Training Options.
+          Manage Training Options — each dog's most recent decision only.
         </p>
+        {stats.attemptHistory.counts.total > 0 && (
+          <p className="text-xs text-gray-400">
+            {stats.attemptHistory.counts.total} total evaluation attempts across{' '}
+            {stats.attemptHistory.dogCount} {stats.attemptHistory.dogCount === 1 ? 'dog' : 'dogs'} — includes
+            retakes on repeatable milestones.
+          </p>
+        )}
       </section>
 
       <section className="space-y-2">
