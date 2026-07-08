@@ -142,6 +142,9 @@ export function getAccount(): Promise<AccountUpdateResponse> {
 export interface DataResponse {
   blob: unknown;
   updatedAt: string;
+  // Server-computed, read-only overlay (#32/#34) — kept unknown here like
+  // blob itself; store.ts is where domain shape gets applied.
+  sharedReports: unknown[];
 }
 
 export function fetchData(): Promise<DataResponse> {
@@ -150,6 +153,32 @@ export function fetchData(): Promise<DataResponse> {
 
 export function putData(blob: unknown, expectedUpdatedAt?: string): Promise<{ updatedAt: string }> {
   return request('/api/data', { method: 'PUT', body: { blob, expectedUpdatedAt } });
+}
+
+export interface DogTransferLinkResult {
+  linkId: string;
+  instructorId: string;
+  instructorName: string;
+  dogId: string;
+  linkedDate: string;
+}
+
+export interface DogTransferResponse {
+  dog?: unknown; // the newly created Dog — present only on a fresh (201) transfer
+  alreadyLinked?: boolean; // present on the idempotent (200) "already transferred" response
+  link: DogTransferLinkResult;
+  updatedAt: string;
+}
+
+export function transferDog(
+  dogId: string,
+  targetInstructorName: string,
+  allowDuplicate = false,
+): Promise<DogTransferResponse> {
+  return request('/api/dogs/transfer', {
+    method: 'POST',
+    body: { dogId, targetInstructorName, allowDuplicate },
+  });
 }
 
 export async function uploadPhoto(blob: Blob): Promise<{ url: string; key: string }> {

@@ -19,6 +19,7 @@ import {
   toggleDogExcludedFromStats,
   toggleDogMilestoneCompletion,
   toggleReportRedFlag,
+  transferDogToInstructor,
   updateDog,
   updateReport,
   useChecklistItems,
@@ -33,6 +34,7 @@ import {
   useLocations,
   useMilestoneTemplates,
   useReportsForDog,
+  useSharedReportsForDog,
 } from '../data/store';
 import {
   DISTRACTION_SEVERITIES,
@@ -242,6 +244,7 @@ export function DogProfile() {
   const allMilestoneTemplates = useMilestoneTemplates();
   const milestoneCompletions = useDogMilestoneCompletions(dogId ?? '');
   const allReports = useReportsForDog(dogId ?? '');
+  const sharedReports = useSharedReportsForDog(dogId ?? '');
   const workedToday = useDogWorkedToday(dogId ?? '');
   const locations = useLocations();
   const distractionTemplates = useDistractionTemplates();
@@ -258,6 +261,10 @@ export function DogProfile() {
   const [moving, setMoving] = useState(false);
   const [pendingPhotoFile, setPendingPhotoFile] = useState<File | null>(null);
   const [editingReportId, setEditingReportId] = useState<string | null>(null);
+  const [transferring, setTransferring] = useState(false);
+  const [transferName, setTransferName] = useState('');
+  const [transferBusy, setTransferBusy] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
 
   const reports = useMemo(() => {
     return allReports.filter((r) => {
@@ -365,6 +372,29 @@ export function DogProfile() {
     removeDogGraduatedStatus(dog.id);
   }
 
+  function handleTransferSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!dog) return;
+    const name = transferName.trim();
+    if (!name) return;
+    setTransferBusy(true);
+    setTransferError(null);
+    transferDogToInstructor(dog.id, name)
+      .then((result) => {
+        setTransferring(false);
+        setTransferName('');
+        alert(
+          result.alreadyLinked
+            ? `${dog.name} was already passed back to ${result.instructorName}.`
+            : `${dog.name} was passed back to ${result.instructorName}.`,
+        );
+      })
+      .catch((err: unknown) => {
+        setTransferError(err instanceof Error ? err.message : 'Transfer failed.');
+      })
+      .finally(() => setTransferBusy(false));
+  }
+
   function handleDeleteReport(id: string) {
     if (!confirm('Delete this training log? This cannot be undone.')) return;
     deleteReport(id);
@@ -446,6 +476,14 @@ export function DogProfile() {
                   className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400"
                 >
                   Excluded from stats
+                </span>
+              )}
+              {dog.passBackSource && (
+                <span
+                  title="This is a pass-back copy — the original stays on the source instructor's own page"
+                  className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-400"
+                >
+                  🔁 Passed back from {dog.passBackSource.instructorName}
                 </span>
               )}
             </div>
@@ -559,12 +597,56 @@ export function DogProfile() {
           {dog.excludedFromStats ? '📊 Excluded from Stats' : '📊 Exclude from Stats'}
         </button>
         <button
+          onClick={() => setTransferring(true)}
+          className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800"
+        >
+          🔁 Transfer to Instructor
+        </button>
+        <button
           onClick={handleDeleteDog}
           className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
         >
           Delete Profile
         </button>
       </div>
+      {transferring && (
+        <form
+          onSubmit={handleTransferSubmit}
+          className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3 text-sm"
+        >
+          <p className="text-gray-600 dark:text-gray-400">
+            Creates a copy of {dog.name} on another instructor's page, marked as a pass-back to
+            them — {dog.name}'s own record here is unaffected.
+          </p>
+          <input
+            autoFocus
+            value={transferName}
+            onChange={(e) => setTransferName(e.target.value)}
+            placeholder="Instructor's name"
+            className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
+          />
+          {transferError && <p className="text-xs text-red-500">{transferError}</p>}
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={transferBusy || !transferName.trim()}
+              className="rounded-md bg-sky-500 px-3 py-1 font-medium text-white hover:bg-sky-600 disabled:opacity-50"
+            >
+              {transferBusy ? 'Transferring…' : 'Transfer'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTransferring(false);
+                setTransferError(null);
+              }}
+              className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1 hover:bg-gray-50 dark:hover:bg-gray-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
       {moving && (
         <MoveDialog
           title={`Move ${dog.name} to…`}
@@ -877,6 +959,56 @@ export function DogProfile() {
           )}
         </ul>
       </section>
+
+      {dog.passBackSource && sharedReports.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
+            Shared History from {dog.passBackSource.instructorName}
+          </h2>
+          <ul className="space-y-2">
+            {sharedReports.map((r) => (
+              <li
+                key={r.id}
+                className="rounded-lg border border-sky-200 dark:border-sky-800 bg-sky-50/40 dark:bg-sky-950/20 p-3 space-y-1"
+              >
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium">
+                    {r.phase} · {new Date(r.createdDate).toLocaleDateString()}
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    Logged by {r.authorInstructorName}
+                  </span>
+                </div>
+                {r.locationLabel && <p className="text-xs text-gray-500">📍 {r.locationLabel}</p>}
+                {r.picture && (
+                  <img
+                    src={r.picture}
+                    alt="Training log attachment"
+                    className="h-24 w-24 rounded-md object-cover"
+                  />
+                )}
+                <p className="text-sm text-gray-700 dark:text-gray-300">{r.notes}</p>
+                {r.skillLabels.length > 0 && (
+                  <p className="text-xs text-gray-500">
+                    Skills worked on: {r.skillLabels.join(', ')}
+                  </p>
+                )}
+                {r.milestoneLabels.length > 0 && (
+                  <p className="text-xs text-gray-500">
+                    Milestones worked on: {r.milestoneLabels.join(', ')}
+                  </p>
+                )}
+                {r.distractionLabels.length > 0 && (
+                  <p className="text-xs text-gray-500">
+                    Distractions:{' '}
+                    {r.distractionLabels.map((d) => `${d.title} (${d.severity})`).join(', ')}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }

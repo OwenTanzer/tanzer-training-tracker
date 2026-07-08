@@ -124,6 +124,35 @@ export interface TrainingReport {
   updatedDate: string;
 }
 
+// A read-only, denormalized projection of another instructor's shared report
+// onto a pass-back copy dog (#32/#34) — never a TrainingReport. The source
+// report's skillIds/milestoneIds/distractions/locationId are foreign keys
+// into the *source* instructor's own checklistItems/milestoneTemplates/
+// distractionTemplates/locations, an id space this instructor's blob has no
+// relationship to (curricula can diverge), so the server resolves them to
+// plain text server-side, at the source, before they ever cross the
+// boundary — the ids themselves never do. `id` is a synthetic
+// `shared:${linkId}:${sourceReportId}` string, deliberately not a real
+// TrainingReport id, so it can never be handed to updateReport/deleteReport/
+// toggleReportRedFlag by accident.
+export interface SharedReportView {
+  id: string;
+  dogId: string;
+  sourceInstructorId: string;
+  sourceDogId: string;
+  sourceReportId: string;
+  phase: Phase;
+  locationLabel: string | null;
+  notes: string;
+  picture: string | null;
+  skillLabels: string[];
+  milestoneLabels: string[];
+  distractionLabels: { title: string; severity: DistractionSeverity }[];
+  authorInstructorName: string;
+  createdDate: string;
+  updatedDate: string;
+}
+
 export interface Location {
   id: string;
   name: string;

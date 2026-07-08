@@ -18,6 +18,133 @@ const EMPTY_BLOB = JSON.stringify({
   dogMilestoneCompletions: [],
 });
 
+// Minimal shapes for the specific blob fields this worker actually reads or
+// writes (pass-back linkage, reports, and the templates a shared report's
+// ids resolve against) — everything else in a blob passes through untouched
+// via object spread, same as how handlePutData/handleGetData already treat
+// the rest of the blob as opaque JSON.
+interface BlobLink {
+  linkId: string;
+  instructorId: string;
+  instructorName: string;
+  dogId: string;
+  linkedDate: string;
+}
+
+interface BlobDog {
+  id: string;
+  name: string;
+  profilePhoto: string | null;
+  folderId: string;
+  passBackSource: BlobLink | null;
+  passBackCopies: BlobLink[];
+}
+
+interface BlobFolder {
+  id: string;
+  name: string;
+  parentFolderId: string | null;
+  sortOrder: number;
+  createdDate: string;
+  updatedDate: string;
+}
+
+interface BlobDistractionObservation {
+  distractionId: string;
+  severity: string;
+}
+
+interface BlobReport {
+  id: string;
+  dogId: string;
+  phase: string;
+  locationId: string | null;
+  notes: string;
+  picture: string | null;
+  skillIds: string[];
+  milestoneIds: string[];
+  distractions: BlobDistractionObservation[];
+  authorInstructorId: string | null;
+  visibility: string;
+  createdDate: string;
+  updatedDate: string;
+}
+
+interface BlobTitledItem {
+  id: string;
+  title: string;
+}
+
+interface BlobLocationItem {
+  id: string;
+  name: string;
+}
+
+// Resolves a receiving blob's linked dogs against each source instructor's
+// own blob into read-only SharedReportView-shaped records: only reports
+// that are both source-authored for that exact link and currently
+// visibility: 'shared' are eligible, and every id (skill/milestone/
+// distraction/location) is resolved to a label here, at the source, since
+// those ids mean nothing in the recipient's own template id space.
+function resolveSharedReports(
+  ownerDogs: BlobDog[],
+  sourceBlobsByInstructorId: Map<string, Record<string, unknown>>,
+): unknown[] {
+  const shared: unknown[] = [];
+
+  for (const dog of ownerDogs) {
+    const link = dog.passBackSource;
+    if (!link) continue;
+    const sourceBlob = sourceBlobsByInstructorId.get(link.instructorId);
+    if (!sourceBlob) continue;
+
+    const sourceReports = (sourceBlob.reports as BlobReport[] | undefined) ?? [];
+    const checklistItems = (sourceBlob.checklistItems as BlobTitledItem[] | undefined) ?? [];
+    const milestoneTemplates = (sourceBlob.milestoneTemplates as BlobTitledItem[] | undefined) ?? [];
+    const distractionTemplates = (sourceBlob.distractionTemplates as BlobTitledItem[] | undefined) ?? [];
+    const locations = (sourceBlob.locations as BlobLocationItem[] | undefined) ?? [];
+
+    const skillTitle = (id: string) => checklistItems.find((c) => c.id === id)?.title ?? id;
+    const milestoneTitle = (id: string) => milestoneTemplates.find((m) => m.id === id)?.title ?? id;
+    const distractionTitle = (id: string) =>
+      distractionTemplates.find((d) => d.id === id)?.title ?? id;
+    const locationName = (id: string | null) =>
+      id ? (locations.find((l) => l.id === id)?.name ?? null) : null;
+
+    for (const report of sourceReports) {
+      if (
+        report.dogId !== link.dogId ||
+        report.authorInstructorId !== link.instructorId ||
+        report.visibility !== 'shared'
+      ) {
+        continue;
+      }
+      shared.push({
+        id: `shared:${link.linkId}:${report.id}`,
+        dogId: dog.id,
+        sourceInstructorId: link.instructorId,
+        sourceDogId: link.dogId,
+        sourceReportId: report.id,
+        phase: report.phase,
+        locationLabel: locationName(report.locationId),
+        notes: report.notes,
+        picture: report.picture,
+        skillLabels: report.skillIds.map(skillTitle),
+        milestoneLabels: report.milestoneIds.map(milestoneTitle),
+        distractionLabels: report.distractions.map((d) => ({
+          title: distractionTitle(d.distractionId),
+          severity: d.severity,
+        })),
+        authorInstructorName: link.instructorName,
+        createdDate: report.createdDate,
+        updatedDate: report.updatedDate,
+      });
+    }
+  }
+
+  return shared;
+}
+
 function allowedOrigin(request: Request, env: Env): string | null {
   const origin = request.headers.get('Origin');
   if (!origin) return null;
@@ -172,7 +299,36 @@ async function handleGetData(request: Request, env: Env): Promise<Response> {
     .first<{ blob: string; updated_at: string }>();
   if (!row) return errorResponse(request, env, 'No data found for this instructor', 404);
 
-  return json(request, env, { blob: JSON.parse(row.blob), updatedAt: row.updated_at }, 200);
+  const blob = JSON.parse(row.blob) as Record<string, unknown>;
+
+  // Sync projection (#32/#34): recomputed fresh on every fetch rather than
+  // copied once and left to drift, so a report going private just stops
+  // appearing on the next GET and a newly-shared one just starts — no
+  // separate "un-sync" step needed anywhere.
+  const dogs = (blob.dogs as BlobDog[] | undefined) ?? [];
+  const sourceInstructorIds = Array.from(
+    new Set(
+      dogs
+        .map((dog) => dog.passBackSource?.instructorId)
+        .filter((id): id is string => typeof id === 'string'),
+    ),
+  );
+
+  let sharedReports: unknown[] = [];
+  if (sourceInstructorIds.length > 0) {
+    const placeholders = sourceInstructorIds.map(() => '?').join(', ');
+    const sourceRows = await env.DB.prepare(
+      `SELECT instructor_id, blob FROM instructor_data WHERE instructor_id IN (${placeholders})`,
+    )
+      .bind(...sourceInstructorIds)
+      .all<{ instructor_id: string; blob: string }>();
+    const sourceBlobsByInstructorId = new Map(
+      sourceRows.results.map((r) => [r.instructor_id, JSON.parse(r.blob) as Record<string, unknown>]),
+    );
+    sharedReports = resolveSharedReports(dogs, sourceBlobsByInstructorId);
+  }
+
+  return json(request, env, { blob, updatedAt: row.updated_at, sharedReports }, 200);
 }
 
 async function handlePutData(request: Request, env: Env): Promise<Response> {
@@ -204,6 +360,197 @@ async function handlePutData(request: Request, env: Env): Promise<Response> {
   }
 
   return json(request, env, { updatedAt: now }, 200);
+}
+
+// Creates the linked pass-back copy (#32/#34): a brand-new Dog in the target
+// instructor's own blob, carrying passBackSource back to the origin, plus a
+// matching passBackCopies entry (same linkId) on the source dog. This is the
+// first endpoint that ever writes to two different instructors' rows in one
+// request — everything else in this file is scoped to the caller's own
+// instructor_id only.
+async function handleTransferDog(request: Request, env: Env): Promise<Response> {
+  const auth = await requireAuth(request, env);
+  if (auth instanceof Response) return auth;
+
+  const body = await request.json<{
+    dogId?: string;
+    targetInstructorName?: string;
+    allowDuplicate?: boolean;
+  }>();
+  const dogId = body.dogId;
+  const targetInstructorName = body.targetInstructorName?.trim();
+  if (!dogId || !targetInstructorName) {
+    return errorResponse(request, env, 'dogId and targetInstructorName are required', 400);
+  }
+
+  const sourceRow = await env.DB.prepare(
+    'SELECT blob, updated_at FROM instructor_data WHERE instructor_id = ?',
+  )
+    .bind(auth)
+    .first<{ blob: string; updated_at: string }>();
+  if (!sourceRow) return errorResponse(request, env, 'No data found for this instructor', 404);
+
+  const sourceBlob = JSON.parse(sourceRow.blob) as Record<string, unknown>;
+  const sourceDogs = (sourceBlob.dogs as BlobDog[] | undefined) ?? [];
+  const sourceDog = sourceDogs.find((d) => d.id === dogId);
+  if (!sourceDog) return errorResponse(request, env, 'Dog not found', 404);
+
+  const sourceInstructor = await env.DB.prepare('SELECT name FROM instructors WHERE id = ?')
+    .bind(auth)
+    .first<{ name: string }>();
+  if (!sourceInstructor) return errorResponse(request, env, 'Instructor not found', 404);
+
+  // First endpoint that exposes another instructor's identity to an
+  // authenticated peer — scoped to an exact-name lookup only, same query
+  // shape as the existing name-uniqueness checks in handleCreateInstructor/
+  // handleUpdateAccount, not a general list/search.
+  const target = await env.DB.prepare('SELECT id, name FROM instructors WHERE name = ? COLLATE NOCASE')
+    .bind(targetInstructorName)
+    .first<{ id: string; name: string }>();
+  if (!target) return errorResponse(request, env, 'Instructor not found', 404);
+  if (target.id === auth) {
+    return errorResponse(request, env, 'Cannot transfer a dog to yourself', 400);
+  }
+
+  // Idempotency: repeating the same transfer (double-tap, retried request)
+  // must not silently fork the dog into two divergent copies.
+  const existingLink = sourceDog.passBackCopies.find((link) => link.instructorId === target.id);
+  if (existingLink && !body.allowDuplicate) {
+    return json(
+      request,
+      env,
+      { alreadyLinked: true, link: existingLink, updatedAt: sourceRow.updated_at },
+      200,
+    );
+  }
+
+  const targetRow = await env.DB.prepare(
+    'SELECT blob, updated_at FROM instructor_data WHERE instructor_id = ?',
+  )
+    .bind(target.id)
+    .first<{ blob: string; updated_at: string }>();
+  if (!targetRow) return errorResponse(request, env, 'Instructor not found', 404);
+
+  const targetBlob = JSON.parse(targetRow.blob) as Record<string, unknown>;
+  const targetFolders = (targetBlob.folders as BlobFolder[] | undefined) ?? [];
+  const targetDogs = (targetBlob.dogs as BlobDog[] | undefined) ?? [];
+
+  const now = new Date().toISOString();
+
+  // A brand-new account may have zero folders, and the source instructor
+  // can't see the target's folder tree to pick one — find-or-create a
+  // well-known root-level landing spot; the recipient can move it later.
+  let passBacksFolder = targetFolders.find(
+    (f) => f.parentFolderId === null && f.name === 'Pass-backs',
+  );
+  let updatedFolders = targetFolders;
+  if (!passBacksFolder) {
+    passBacksFolder = {
+      id: generateId(),
+      name: 'Pass-backs',
+      parentFolderId: null,
+      sortOrder: targetFolders.filter((f) => f.parentFolderId === null).length,
+      createdDate: now,
+      updatedDate: now,
+    };
+    updatedFolders = [...targetFolders, passBacksFolder];
+  }
+
+  const linkId = generateId();
+  const newDogId = generateId();
+  const newDog = {
+    id: newDogId,
+    name: sourceDog.name,
+    profilePhoto: sourceDog.profilePhoto,
+    folderId: passBacksFolder.id,
+    sortOrder: targetDogs.filter((d) => d.folderId === passBacksFolder!.id).length,
+    currentPhase: 'Phase 1',
+    graduationProgress: 0,
+    graduationStatus: 'Not Started',
+    released: false,
+    releasedDate: null,
+    graduated: false,
+    graduatedDate: null,
+    // Defaults excluded from the receiving instructor's stats — it's
+    // someone else's training judgment landing here, not this instructor's
+    // own outcome; they can flip the existing toggle if they want it counted.
+    excludedFromStats: true,
+    passBackSource: {
+      linkId,
+      instructorId: auth,
+      instructorName: sourceInstructor.name,
+      dogId: sourceDog.id,
+      linkedDate: now,
+    },
+    passBackCopies: [],
+    createdDate: now,
+    updatedDate: now,
+  };
+
+  const updatedTargetBlob = {
+    ...targetBlob,
+    folders: updatedFolders,
+    dogs: [...targetDogs, newDog],
+  };
+
+  // CAS'd, sequential, with best-effort compensation on partial failure —
+  // NOT an unconditional two-row write. This endpoint (unlike
+  // importLegacyDatabase's unconditional PUT, which only ever overwrites
+  // the importing account's own row) touches two different instructors'
+  // rows, so an unconditional write could silently erase the target
+  // trainer's latest edits if they're using the app at the same moment.
+  // D1 batch() only rolls back on a thrown error, not on a conditional
+  // UPDATE matching zero rows, so batching two CAS'd statements together
+  // would risk letting one half of a transfer commit without the other —
+  // these are deliberately two separate round trips instead.
+  const targetWrite = await env.DB.prepare(
+    'UPDATE instructor_data SET blob = ?, updated_at = ? WHERE instructor_id = ? AND updated_at = ?',
+  )
+    .bind(JSON.stringify(updatedTargetBlob), now, target.id, targetRow.updated_at)
+    .run();
+  if (targetWrite.meta.changes === 0) {
+    return errorResponse(request, env, 'Target instructor changed elsewhere — try again', 409);
+  }
+
+  const newLink: BlobLink = {
+    linkId,
+    instructorId: target.id,
+    instructorName: target.name,
+    dogId: newDogId,
+    linkedDate: now,
+  };
+  const updatedSourceBlob = {
+    ...sourceBlob,
+    dogs: sourceDogs.map((d) =>
+      d.id === dogId ? { ...d, passBackCopies: [...d.passBackCopies, newLink] } : d,
+    ),
+  };
+
+  const sourceWrite = await env.DB.prepare(
+    'UPDATE instructor_data SET blob = ?, updated_at = ? WHERE instructor_id = ? AND updated_at = ?',
+  )
+    .bind(JSON.stringify(updatedSourceBlob), now, auth, sourceRow.updated_at)
+    .run();
+
+  if (sourceWrite.meta.changes === 0) {
+    // Best-effort compensation, not a real cross-row transaction: roll the
+    // target write back, conditioned on the updated_at this request itself
+    // just set (a value only this request knows), so it succeeds unless the
+    // target instructor wrote again in the narrow window since. If that
+    // rollback CAS also fails (a second concurrent target write), the
+    // result is a genuinely inconsistent state — target has the copy,
+    // source has no forward link — that this endpoint does not auto-repair.
+    // Known technical debt: the durable fix is a dedicated link table so
+    // the transfer relation isn't hostage to whole-blob CAS at all.
+    await env.DB.prepare(
+      'UPDATE instructor_data SET blob = ?, updated_at = ? WHERE instructor_id = ? AND updated_at = ?',
+    )
+      .bind(targetRow.blob, new Date().toISOString(), target.id, now)
+      .run();
+    return errorResponse(request, env, 'Data changed elsewhere — reload before continuing', 409);
+  }
+
+  return json(request, env, { dog: newDog, link: newLink, updatedAt: now }, 201);
 }
 
 async function handleUploadPhoto(request: Request, env: Env): Promise<Response> {
@@ -343,6 +690,9 @@ export default {
       }
       if (pathname === '/api/data' && method === 'PUT') {
         return await handlePutData(request, env);
+      }
+      if (pathname === '/api/dogs/transfer' && method === 'POST') {
+        return await handleTransferDog(request, env);
       }
       if (pathname === '/api/photos' && method === 'POST') {
         return await handleUploadPhoto(request, env);

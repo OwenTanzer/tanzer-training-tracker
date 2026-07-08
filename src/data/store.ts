@@ -12,6 +12,7 @@ import type {
   MilestoneTemplate,
   Phase,
   PhaseChecklistItem,
+  SharedReportView,
   TrainingReport,
 } from '../types';
 import {
@@ -29,13 +30,18 @@ import {
 import { buildDefaultChecklist } from './defaultChecklist';
 import { buildDefaultMilestones } from './defaultMilestones';
 import { logError, logEvent } from '../lib/diagnostics';
-import { ApiError, fetchData, putData, uploadPhoto } from '../lib/api';
+import { ApiError, fetchData, putData, transferDog, uploadPhoto } from '../lib/api';
 import { dataUrlToBlob } from '../lib/compressImage';
 
 let db: Database = emptyDatabase();
 let currentInstructorId: string | null = null;
 let hydrated = false;
 let lastKnownUpdatedAt: string | null = null;
+// Server-computed, read-only overlay (#32/#34) — populated on every
+// hydrateFromServer(), never included in what notify()/syncToServer() PUTs
+// (it lives entirely outside `db`), so a recipient's own stored blob can
+// never accidentally absorb another instructor's report data.
+let sharedReports: SharedReportView[] = [];
 
 // Bumped by every hydrateFromServer()/resetLocalStore() call (i.e. every
 // session transition). Async work kicked off by an earlier generation checks
@@ -155,13 +161,14 @@ export async function hydrateFromServer(instructorId: string): Promise<void> {
   const myGeneration = ++generation;
   currentInstructorId = instructorId;
   try {
-    const { blob, updatedAt } = await fetchData();
+    const { blob, updatedAt, sharedReports: sharedReportsResponse } = await fetchData();
     // A newer session (another hydrate, or a logout) has since taken over —
     // this response belongs to a session that's no longer active, so drop it
     // rather than resurrecting its data (and instructorId) as if it were current.
     if (myGeneration !== generation) return;
     db = normalizeDatabase(blob as Record<string, unknown>, instructorId);
     lastKnownUpdatedAt = updatedAt;
+    sharedReports = sharedReportsResponse as SharedReportView[];
     hydrated = true;
     syncStatus = 'synced';
     pruneUnreachableLegacyData();
@@ -183,6 +190,10 @@ export async function hydrateFromServer(instructorId: string): Promise<void> {
         // as an unconditional write, silently clobbering anything written
         // by another device in the meantime instead of correctly 409-ing.
         lastKnownUpdatedAt = cached.updatedAt;
+        // Shared history is a best-effort, online-only overlay — the local
+        // cache only ever mirrors this instructor's own blob, so there's
+        // nothing to fall back to here.
+        sharedReports = [];
         hydrated = true;
         syncStatus = 'error';
         pruneUnreachableLegacyData();
@@ -380,6 +391,7 @@ export function resetLocalStore(): void {
   currentInstructorId = null;
   hydrated = false;
   lastKnownUpdatedAt = null;
+  sharedReports = [];
   syncStatus = 'idle';
   // A PUT belonging to the session being closed may still be in flight (its
   // completion handlers are now moot — see the generation check in
@@ -644,6 +656,56 @@ export function createDog(
   return dog;
 }
 
+export interface TransferDogResult {
+  // True when this dog was already passed back to that instructor and the
+  // server returned the existing link instead of creating a second copy.
+  alreadyLinked: boolean;
+  instructorName: string;
+}
+
+// Creates a linked pass-back copy of this dog on another instructor's
+// account (#32/#34). An out-of-band await like importLegacyDatabase, not
+// the generic notify()/syncToServer() queue — the source blob was already
+// written server-side by the transfer endpoint itself, so re-PUTting it here
+// would just be a redundant, no-op write.
+export async function transferDogToInstructor(
+  dogId: string,
+  targetInstructorName: string,
+  allowDuplicate = false,
+): Promise<TransferDogResult> {
+  const myGeneration = generation;
+  const response = await transferDog(dogId, targetInstructorName, allowDuplicate);
+  const result: TransferDogResult = {
+    alreadyLinked: response.alreadyLinked ?? false,
+    instructorName: response.link.instructorName,
+  };
+
+  // A newer session has since taken over — applying this to the current
+  // generation's local state would show one account's transfer under a
+  // different one (same hazard hydrateFromServer/importLegacyDatabase guard).
+  if (myGeneration !== generation) return result;
+
+  const dog = db.dogs.find((d) => d.id === dogId);
+  if (dog && !dog.passBackCopies.some((link) => link.linkId === response.link.linkId)) {
+    db = {
+      ...db,
+      dogs: db.dogs.map((d) =>
+        d.id === dogId ? { ...d, passBackCopies: [...d.passBackCopies, response.link] } : d,
+      ),
+    };
+  }
+  lastKnownUpdatedAt = response.updatedAt;
+  if (currentInstructorId) saveServerCache(currentInstructorId, db, lastKnownUpdatedAt);
+  notifyListeners();
+  logEvent(
+    'Dog transferred',
+    result.alreadyLinked
+      ? `dog ${dogId} already passed back to ${result.instructorName}`
+      : `dog ${dogId} -> ${result.instructorName}`,
+  );
+  return result;
+}
+
 export function reorderDogs(folderId: string, orderedIds: string[]): void {
   orderedIds.forEach((id, index) => {
     const dog = db.dogs.find((d) => d.id === id && d.folderId === folderId);
@@ -809,6 +871,17 @@ export function deleteDog(id: string): void {
 export function useReportsForDog(dogId: string): TrainingReport[] {
   return useDatabase()
     .reports.filter((r) => r.dogId === dogId)
+    .sort((a, b) => b.createdDate.localeCompare(a.createdDate));
+}
+
+// Read-only overlay of another instructor's shared reports on a pass-back
+// copy dog (#32/#34) — kept separate from useReportsForDog rather than
+// merged into it, since SharedReportView and TrainingReport are different
+// shapes (resolved labels vs. ids) meant to render differently; a silent
+// merge would force every consumer to type-discriminate.
+export function useSharedReportsForDog(dogId: string): SharedReportView[] {
+  return useSyncExternalStore(subscribe, () => sharedReports)
+    .filter((r) => r.dogId === dogId)
     .sort((a, b) => b.createdDate.localeCompare(a.createdDate));
 }
 
