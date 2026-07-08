@@ -3,7 +3,7 @@
 // issue #15 — the point isn't to depict one specific dog, just to make the
 // per-load randomization feel like it could be any of the org's dogs.
 export interface GuideDogCoat {
-  id: 'german-shepherd' | 'yellow-lab' | 'black-lab' | 'black-and-tan';
+  id: 'german-shepherd' | 'yellow-lab' | 'black-lab' | 'chocolate-lab';
   label: string;
   body: string;
   ear: string;
@@ -37,12 +37,12 @@ export const GUIDE_DOG_COATS: GuideDogCoat[] = [
     leg: '#2b2b30',
   },
   {
-    id: 'black-and-tan',
-    label: 'Black & Tan Lab',
-    body: '#241f1d',
-    ear: '#241f1d',
-    muzzle: '#a9713f',
-    leg: '#a9713f',
+    id: 'chocolate-lab',
+    label: 'Chocolate Lab',
+    body: '#6b4226',
+    ear: '#563219',
+    muzzle: '#563219',
+    leg: '#6b4226',
   },
 ];
 
