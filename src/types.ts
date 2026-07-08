@@ -38,6 +38,21 @@ export interface Folder {
   updatedDate: string;
 }
 
+// One transfer relation between two instructors' dog records (#32/#34).
+// linkId is shared by both sides of the same transfer — the source dog's
+// passBackCopies entry and the receiving dog's passBackSource — so a future
+// sync engine can match them exactly instead of inferring the pairing from
+// instructorId/dogId/linkedDate, which breaks once either side is edited or
+// a dog is transferred more than once. instructorName is denormalized since
+// there is no cross-instructor read endpoint to look it up live.
+export interface DogPassBackLink {
+  linkId: string;
+  instructorId: string;
+  instructorName: string;
+  dogId: string;
+  linkedDate: string;
+}
+
 export interface Dog {
   id: string;
   name: string;
@@ -61,6 +76,14 @@ export interface Dog {
   // touching their actual record — the dog's own profile, progress, and
   // released/graduated status are completely unaffected by this flag.
   excludedFromStats: boolean;
+  // Present only on a receiving copy created by duplicating another
+  // instructor's dog onto this account (#32) — points back to the origin.
+  // Null for ordinary dogs and for the source side of a transfer.
+  passBackSource: DogPassBackLink | null;
+  // Forward audit trail on the *source* dog: one entry per instructor this
+  // dog has been duplicated to. Also what a future sync engine reads to know
+  // where to push updates so a transferred dog's copy stays in sync (#34).
+  passBackCopies: DogPassBackLink[];
   createdDate: string;
   updatedDate: string;
 }
@@ -69,6 +92,15 @@ export interface DistractionObservation {
   distractionId: string;
   severity: DistractionSeverity;
 }
+
+// Explicit, authoritative privacy state for a report (#34) — kept separate
+// from redFlag so a future cross-instructor filter (auto-share on pass-back,
+// red-flag privacy) has one canonical field to read instead of re-deriving
+// visibility from redFlag at every call site. Currently kept in lockstep
+// with redFlag wherever redFlag is written; a future manual override (e.g.
+// "share this red-flagged report anyway") only has to change how this field
+// gets set, not add a new concept to every reader.
+export type ReportVisibility = 'shared' | 'private';
 
 export interface TrainingReport {
   id: string;
@@ -81,6 +113,13 @@ export interface TrainingReport {
   skillIds: string[];
   milestoneIds: string[];
   distractions: DistractionObservation[];
+  // The instructor who wrote this report (#34). Null only for reports that
+  // predate any instructor-id concept (pre-account, single-browser legacy
+  // data) — every real account's reports backfill to that account's own id,
+  // since before pass-back copies existed every report in an instructor's
+  // blob was self-authored.
+  authorInstructorId: string | null;
+  visibility: ReportVisibility;
   createdDate: string;
   updatedDate: string;
 }

@@ -129,9 +129,10 @@ function backfillSortOrder<T extends { sortOrder?: number }>(
   });
 }
 
-// Dogs predating the "released" status (#13), "graduated" lock (#31), or
-// stats-exclusion flag won't have these fields in their stored JSON at all,
-// so they'd otherwise come back as undefined.
+// Dogs predating the "released" status (#13), "graduated" lock (#31),
+// stats-exclusion flag, or pass-back linkage (#32/#34) won't have these
+// fields in their stored JSON at all, so they'd otherwise come back as
+// undefined.
 function backfillDogs(dogs: Dog[]): Dog[] {
   return backfillSortOrder(
     dogs.map((dog) => ({
@@ -141,6 +142,8 @@ function backfillDogs(dogs: Dog[]): Dog[] {
       graduated: dog.graduated ?? false,
       graduatedDate: dog.graduatedDate ?? null,
       excludedFromStats: dog.excludedFromStats ?? false,
+      passBackSource: dog.passBackSource ?? null,
+      passBackCopies: dog.passBackCopies ?? [],
     })),
     (dog) => dog.folderId,
   );
@@ -169,13 +172,22 @@ function backfillFolders(folders: Folder[]): Folder[] {
 }
 
 // Reports predating "skills worked on" (#18), "milestones worked on" and
-// "distractions encountered" (#35/#36) won't have these fields stored.
-function backfillReports(reports: TrainingReport[]): TrainingReport[] {
+// "distractions encountered" (#35/#36), or authorship/visibility (#34) won't
+// have these fields stored. ownerInstructorId is the instructor whose blob
+// this report is being loaded into, when known (see normalizeDatabase) — a
+// report missing authorInstructorId predates pass-back copies entirely, so
+// it was necessarily self-authored by whoever owns this blob.
+function backfillReports(
+  reports: TrainingReport[],
+  ownerInstructorId?: string,
+): TrainingReport[] {
   return reports.map((report) => ({
     ...report,
     skillIds: report.skillIds ?? [],
     milestoneIds: report.milestoneIds ?? [],
     distractions: report.distractions ?? [],
+    authorInstructorId: report.authorInstructorId ?? ownerInstructorId ?? null,
+    visibility: report.visibility ?? (report.redFlag ? 'private' : 'shared'),
   }));
 }
 
@@ -189,7 +201,10 @@ function backfillCompletions(completions: DogChecklistCompletion[]): DogChecklis
   }));
 }
 
-export function normalizeDatabase(parsed: Record<string, unknown>): Database {
+export function normalizeDatabase(
+  parsed: Record<string, unknown>,
+  ownerInstructorId?: string,
+): Database {
   if (
     Array.isArray(parsed.milestoneTemplates) &&
     Array.isArray(parsed.dogMilestoneCompletions)
@@ -197,7 +212,7 @@ export function normalizeDatabase(parsed: Record<string, unknown>): Database {
     const database = parsed as unknown as Database;
     database.folders = backfillFolders(database.folders ?? []);
     database.dogs = backfillDogs(database.dogs ?? []);
-    database.reports = backfillReports(database.reports ?? []);
+    database.reports = backfillReports(database.reports ?? [], ownerInstructorId);
     database.completions = backfillCompletions(database.completions ?? []);
     database.milestoneTemplates = backfillMilestoneTemplates(database.milestoneTemplates ?? []);
     database.dogMilestoneCompletions = backfillDogMilestoneCompletions(
@@ -222,7 +237,7 @@ export function normalizeDatabase(parsed: Record<string, unknown>): Database {
   const database: Database = {
     folders: backfillFolders((parsed.folders as Folder[]) ?? []),
     dogs: backfillDogs((parsed.dogs as Dog[]) ?? []),
-    reports: backfillReports((parsed.reports as TrainingReport[]) ?? []),
+    reports: backfillReports((parsed.reports as TrainingReport[]) ?? [], ownerInstructorId),
     locations: (parsed.locations as Location[]) ?? [],
     checklistItems: (parsed.checklistItems as PhaseChecklistItem[]) ?? buildDefaultChecklist(),
     completions: backfillCompletions((parsed.completions as DogChecklistCompletion[]) ?? []),
@@ -296,7 +311,7 @@ export function loadServerCache(instructorId: string): ServerCacheEntry | null {
     const parsed = JSON.parse(raw) as Partial<ServerCacheEntry> | null;
     if (!parsed || typeof parsed !== 'object' || !parsed.blob) return null;
     return {
-      blob: normalizeDatabase(parsed.blob as unknown as Record<string, unknown>),
+      blob: normalizeDatabase(parsed.blob as unknown as Record<string, unknown>, instructorId),
       updatedAt: parsed.updatedAt ?? null,
     };
   } catch {

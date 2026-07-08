@@ -160,7 +160,7 @@ export async function hydrateFromServer(instructorId: string): Promise<void> {
     // this response belongs to a session that's no longer active, so drop it
     // rather than resurrecting its data (and instructorId) as if it were current.
     if (myGeneration !== generation) return;
-    db = normalizeDatabase(blob as Record<string, unknown>);
+    db = normalizeDatabase(blob as Record<string, unknown>, instructorId);
     lastKnownUpdatedAt = updatedAt;
     hydrated = true;
     syncStatus = 'synced';
@@ -336,6 +336,10 @@ async function migratePhotosToServer(source: Database): Promise<Database> {
     source.reports.map(async (report) => ({
       ...report,
       picture: await uploadEmbeddedPhoto(report.picture),
+      // Legacy reports predate any instructor-id concept, so
+      // normalizeDatabase left authorInstructorId null — now that this data
+      // is finally being claimed by a real account, tag it with that owner.
+      authorInstructorId: report.authorInstructorId ?? currentInstructorId,
     })),
   );
   const dogMilestoneCompletions = await Promise.all(
@@ -629,6 +633,8 @@ export function createDog(
     graduated: false,
     graduatedDate: null,
     excludedFromStats: false,
+    passBackSource: null,
+    passBackCopies: [],
     createdDate: now(),
     updatedDate: now(),
   };
@@ -942,6 +948,8 @@ export function createReport(
   const report: TrainingReport = {
     id: uid(),
     ...input,
+    authorInstructorId: currentInstructorId,
+    visibility: input.redFlag ? 'private' : 'shared',
     createdDate: now(),
     updatedDate: now(),
   };
@@ -963,6 +971,7 @@ export function toggleReportRedFlag(id: string): void {
   const report = db.reports.find((r) => r.id === id);
   if (!report) return;
   report.redFlag = !report.redFlag;
+  report.visibility = report.redFlag ? 'private' : 'shared';
   report.updatedDate = now();
   notify();
   logEvent('Log red flag toggled', `log ${id} -> ${report.redFlag}`);
@@ -983,6 +992,7 @@ export function updateReport(id: string, updates: UpdateReportInput): boolean {
   const report = db.reports.find((r) => r.id === id);
   if (!report) return false;
   Object.assign(report, updates, { updatedDate: now() });
+  report.visibility = report.redFlag ? 'private' : 'shared';
   if (updates.locationId) {
     const location = db.locations.find((l) => l.id === updates.locationId);
     if (location) location.lastUsedDate = now();
