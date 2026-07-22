@@ -70,6 +70,8 @@ export interface Dog {
   // graduationStatus so later edits to the shared skill/milestone templates
   // never retroactively change what a graduated dog displays.
   graduated: boolean;
+  // Domain date for graduation (YYYY-MM-DD), separate from updatedDate's
+  // audit timestamp.
   graduatedDate: string | null;
   // Lets a trainer omit a specific dog (a pass-back, a health release, etc.)
   // from the "refined" success-rate calculation on Trainer History without

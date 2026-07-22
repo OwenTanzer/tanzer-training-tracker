@@ -1,3 +1,4 @@
+import { calendarDateAtLocalNoon } from '../../shared/sessionDate';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -250,7 +251,7 @@ export function TrainerHistory() {
                   <span className="font-medium text-gray-900 dark:text-gray-100">{dog.name}</span>
                   <span className="text-xs text-emerald-600 dark:text-emerald-400">
                     {dog.graduatedDate
-                      ? `Graduated ${new Date(dog.graduatedDate).toLocaleDateString()}`
+                      ? `Graduated ${calendarDateAtLocalNoon(dog.graduatedDate).toLocaleDateString()}`
                       : 'Graduated'}
                   </span>
                 </Link>

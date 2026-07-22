@@ -1,4 +1,10 @@
-import { isFutureSessionDate, localSessionDate } from '../../shared/sessionDate';
+import {
+  calendarDateAtLocalNoon,
+  isFutureSessionDate,
+  isValidCalendarDate,
+  localSessionDate,
+  storedLocalCalendarDate,
+} from '../../shared/sessionDate';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MoveDialog } from '../components/MoveDialog';
@@ -24,6 +30,7 @@ import {
   toggleDogExcludedFromStats,
   toggleDogMilestoneCompletion,
   toggleReportRedFlag,
+  updateDogGraduationDate,
   transferDogToInstructor,
   updateDog,
   updateReport,
@@ -417,6 +424,9 @@ export function DogProfile() {
   const [transferName, setTransferName] = useState('');
   const [transferBusy, setTransferBusy] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
+  const [editingGraduationDate, setEditingGraduationDate] = useState(false);
+  const [graduationDateDraft, setGraduationDateDraft] = useState(localSessionDate);
+  const [graduationDateError, setGraduationDateError] = useState<string | null>(null);
 
   const reports = useMemo(() => {
     return allReports.filter((r) => {
@@ -500,20 +510,53 @@ export function DogProfile() {
     reactivateDog(dog.id);
   }
 
-  function handleMarkGraduated() {
+  function openGraduationDateEditor() {
     if (!dog) return;
     if (dog.released) {
       alert(`Reactivate ${dog.name} before marking them Graduated.`);
       return;
     }
+    setGraduationDateDraft(
+      dog.graduatedDate ? storedLocalCalendarDate(dog.graduatedDate) : localSessionDate(),
+    );
+    setGraduationDateError(null);
+    setEditingGraduationDate(true);
+  }
+
+  function handleGraduationDateSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!dog) return;
+    setGraduationDateError(null);
+    if (!isValidCalendarDate(graduationDateDraft)) {
+      setGraduationDateError('Choose a valid graduation date.');
+      return;
+    }
+    if (isFutureSessionDate(graduationDateDraft)) {
+      setGraduationDateError('Graduation dates cannot be in the future.');
+      return;
+    }
+    if (dog.released && !dog.graduated) {
+      setGraduationDateError(`Reactivate ${dog.name} before marking them Graduated.`);
+      return;
+    }
     if (
+      !dog.graduated &&
       !confirm(
-        `Mark ${dog.name} as Graduated? This checks off every current skill and milestone and freezes their progress at 100%, even if the shared skill/milestone list changes later.`,
+        `Mark ${dog.name} as Graduated on ${calendarDateAtLocalNoon(graduationDateDraft).toLocaleDateString()}? This checks off every current skill and milestone and freezes progress at 100%.`,
       )
     ) {
       return;
     }
-    markDogGraduated(dog.id);
+    const persisted = dog.graduated
+      ? updateDogGraduationDate(dog.id, graduationDateDraft)
+      : markDogGraduated(dog.id, graduationDateDraft);
+    if (!persisted) {
+      setGraduationDateError(
+        "This graduation date didn't save — your browser's storage is likely full.",
+      );
+      return;
+    }
+    setEditingGraduationDate(false);
   }
 
   function handleRemoveGraduatedStatus() {
@@ -521,7 +564,9 @@ export function DogProfile() {
     if (!confirm(`Remove ${dog.name}'s Graduated status? Their progress will recalculate live again.`)) {
       return;
     }
-    removeDogGraduatedStatus(dog.id);
+    if (removeDogGraduatedStatus(dog.id)) {
+      setEditingGraduationDate(false);
+    }
   }
 
   function handleTransferSubmit(e: React.FormEvent) {
@@ -666,14 +711,70 @@ export function DogProfile() {
               Released on {new Date(dog.releasedDate).toLocaleDateString()}
             </p>
           )}
-          {dog.graduated && dog.graduatedDate && (
-            <p className="text-xs text-emerald-600 dark:text-emerald-400">
-              🎓 Graduated on {new Date(dog.graduatedDate).toLocaleDateString()} — progress is frozen
-            </p>
+          {dog.graduated && (
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                🎓 Graduated
+                {dog.graduatedDate && (
+                  <> on {calendarDateAtLocalNoon(dog.graduatedDate).toLocaleDateString()}</>
+                )}
+                {' — progress is frozen'}
+              </p>
+              <button
+                type="button"
+                onClick={openGraduationDateEditor}
+                className="text-xs text-sky-600 hover:underline dark:text-sky-400"
+              >
+                Edit date
+              </button>
+            </div>
           )}
           {photoError && <p className="text-xs text-red-500">{photoError}</p>}
         </div>
       </div>
+      {editingGraduationDate && (
+        <form
+          onSubmit={handleGraduationDateSubmit}
+          className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900 dark:bg-emerald-950/20"
+        >
+          <label
+            htmlFor="graduation-date"
+            className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+          >
+            {dog.graduated ? 'Correct graduation date' : 'Graduation date'}
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              id="graduation-date"
+              type="date"
+              value={graduationDateDraft}
+              onChange={(e) => setGraduationDateDraft(e.target.value)}
+              max={localSessionDate()}
+              required
+              className="min-h-10 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+            />
+            <button
+              type="submit"
+              className="min-h-10 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+            >
+              {dog.graduated ? 'Save date' : 'Confirm Graduation'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditingGraduationDate(false);
+                setGraduationDateError(null);
+              }}
+              className="min-h-10 rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600"
+            >
+              Cancel
+            </button>
+          </div>
+          {graduationDateError && (
+            <p className="text-sm text-red-500">{graduationDateError}</p>
+          )}
+        </form>
+      )}
       {pendingPhotoFile && (
         <PhotoCropDialog
           file={pendingPhotoFile}
@@ -723,7 +824,7 @@ export function DogProfile() {
           </button>
         ) : (
           <button
-            onClick={handleMarkGraduated}
+            onClick={openGraduationDateEditor}
             disabled={dog.released}
             title={dog.released ? 'Reactivate this dog first' : undefined}
             className={`rounded-md border border-emerald-300 px-3 py-1.5 text-sm font-medium text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950 ${

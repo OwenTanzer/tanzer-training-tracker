@@ -1,4 +1,4 @@
-import { legacySessionDate } from '../../shared/sessionDate';
+import { legacySessionDate, storedLocalCalendarDate } from '../../shared/sessionDate';
 import type {
   Dog,
   DogChecklistCompletion,
@@ -148,7 +148,7 @@ function backfillDogs(dogs: Dog[]): Dog[] {
       released: dog.released ?? false,
       releasedDate: dog.releasedDate ?? null,
       graduated: dog.graduated ?? false,
-      graduatedDate: dog.graduatedDate ?? null,
+      graduatedDate: dog.graduatedDate ? storedLocalCalendarDate(dog.graduatedDate) : null,
       excludedFromStats: dog.excludedFromStats ?? false,
       passBackSource: dog.passBackSource ?? null,
       passBackCopies: dog.passBackCopies ?? [],

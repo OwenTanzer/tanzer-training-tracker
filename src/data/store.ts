@@ -1,4 +1,8 @@
-import { localSessionDate } from '../../shared/sessionDate';
+import {
+  isFutureSessionDate,
+  isValidCalendarDate,
+  localSessionDate,
+} from '../../shared/sessionDate';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type {
   Dog,
@@ -770,9 +774,13 @@ export function toggleDogExcludedFromStats(id: string): boolean {
 // the `dog.graduated` guard in refreshDogProgress/refreshAllDogsProgress), so
 // adding a new skill/milestone template later never makes an already-
 // graduated dog look incomplete again.
-export function markDogGraduated(id: string): boolean {
+export function markDogGraduated(
+  id: string,
+  graduationDate = localSessionDate(),
+): boolean {
   const dog = db.dogs.find((d) => d.id === id);
   if (!dog) return false;
+  if (!isValidCalendarDate(graduationDate) || isFutureSessionDate(graduationDate)) return false;
   // Released and Graduated are mutually exclusive outcomes for a dog — a
   // released dog must be reactivated first (see releaseDog's own guard for
   // the reverse direction).
@@ -825,12 +833,28 @@ export function markDogGraduated(id: string): boolean {
   });
 
   dog.graduated = true;
-  dog.graduatedDate = completedAt;
+  dog.graduatedDate = graduationDate;
   dog.graduationStatus = 'Graduated';
   dog.graduationProgress = 100;
   dog.updatedDate = completedAt;
   const persisted = notify();
   logEvent('Dog graduated', id);
+  return persisted;
+}
+
+export function updateDogGraduationDate(id: string, graduationDate: string): boolean {
+  const dog = db.dogs.find((d) => d.id === id);
+  if (
+    !dog?.graduated ||
+    !isValidCalendarDate(graduationDate) ||
+    isFutureSessionDate(graduationDate)
+  ) {
+    return false;
+  }
+  dog.graduatedDate = graduationDate;
+  dog.updatedDate = now();
+  const persisted = notify();
+  logEvent('Dog graduation date updated', `${id} -> ${graduationDate}`);
   return persisted;
 }
 
