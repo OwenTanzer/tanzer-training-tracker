@@ -22,6 +22,21 @@ test('session counts use the canonical local session date', () => {
   });
 });
 
+test('session counts refresh after reports are mutated in place', () => {
+  const reports = [{ dogId: 'dog-1', sessionDate: '2026-07-21' }];
+
+  assert.deepEqual(sessionCountsByDogOnDate(reports, '2026-07-22'), {});
+
+  reports[0].sessionDate = '2026-07-22';
+  assert.deepEqual(sessionCountsByDogOnDate(reports, '2026-07-22'), { 'dog-1': 1 });
+
+  reports.push({ dogId: 'dog-1', sessionDate: '2026-07-22' });
+  assert.deepEqual(sessionCountsByDogOnDate(reports, '2026-07-22'), { 'dog-1': 2 });
+
+  reports[0].sessionDate = '2026-07-21';
+  assert.deepEqual(sessionCountsByDogOnDate(reports, '2026-07-22'), { 'dog-1': 1 });
+});
+
 test('daily work levels distinguish zero, one, and multiple sessions', () => {
   assert.equal(dailyWorkLevel(0), 'none');
   assert.equal(dailyWorkLevel(1), 'once');

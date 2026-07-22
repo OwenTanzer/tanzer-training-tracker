@@ -992,7 +992,9 @@ function useCurrentLocalDate(): string {
 export function useDailySessionCounts(): Record<string, number> {
   const reports = useDatabase().reports;
   const today = useCurrentLocalDate();
-  return useMemo(() => sessionCountsByDogOnDate(reports, today), [reports, today]);
+  // Report writes preserve the nested array reference, so derive this inexpensive
+  // count on every database render rather than caching against a stale reference.
+  return sessionCountsByDogOnDate(reports, today);
 }
 
 export function useDogSessionCountToday(dogId: string): number {
