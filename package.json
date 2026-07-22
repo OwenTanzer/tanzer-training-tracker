@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node --experimental-strip-types --test tests/sessionDate.test.ts",
+    "test": "node --experimental-strip-types --test tests/sessionDate.test.ts tests/phaseGroups.test.ts",
     "preview": "vite preview",
     "deploy": "wrangler deploy"
   },

@@ -1,6 +1,7 @@
 import { isFutureSessionDate, localSessionDate } from '../../shared/sessionDate';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { PhaseGroupedPicker } from '../components/PhaseGroupedPicker';
 import { ApiError, uploadPhoto } from '../lib/api';
 import { compressImageToBlob } from '../lib/compressImage';
 import {
@@ -46,8 +47,8 @@ export function NewReport() {
   const [distractionSeverities, setDistractionSeverities] = useState<
     Record<string, DistractionSeverity | ''>
   >({});
-  const skillsForPhase = useChecklistItems(dog?.currentPhase);
-  const milestonesForPhase = useMilestoneTemplates(dog?.currentPhase);
+  const skills = useChecklistItems();
+  const milestones = useMilestoneTemplates();
 
   useEffect(() => {
     if (!pictureFile) return;
@@ -181,44 +182,26 @@ export function NewReport() {
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Skills worked on
           </label>
-          <div className="space-y-1">
-            {skillsForPhase.map((item) => (
-              <label key={item.id} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={skillIds.includes(item.id)}
-                  onChange={() => toggleSkill(item.id)}
-                />
-                {item.title}
-              </label>
-            ))}
-            {skillsForPhase.length === 0 && (
-              <p className="text-sm text-gray-400">No skills set up for {dog.currentPhase} yet.</p>
-            )}
-          </div>
+          <PhaseGroupedPicker
+            items={skills}
+            selectedIds={skillIds}
+            currentPhase={dog.currentPhase}
+            itemKind="skills"
+            onToggle={toggleSkill}
+          />
         </div>
 
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Milestones worked on
           </label>
-          <div className="space-y-1">
-            {milestonesForPhase.map((m) => (
-              <label key={m.id} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={milestoneIds.includes(m.id)}
-                  onChange={() => toggleMilestone(m.id)}
-                />
-                {m.title}
-              </label>
-            ))}
-            {milestonesForPhase.length === 0 && (
-              <p className="text-sm text-gray-400">
-                No milestones set up for {dog.currentPhase} yet.
-              </p>
-            )}
-          </div>
+          <PhaseGroupedPicker
+            items={milestones}
+            selectedIds={milestoneIds}
+            currentPhase={dog.currentPhase}
+            itemKind="milestones"
+            onToggle={toggleMilestone}
+          />
         </div>
 
         <div>

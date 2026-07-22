@@ -3,9 +3,11 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MoveDialog } from '../components/MoveDialog';
 import { PencilIcon, TrashIcon } from '../components/icons';
+import { PhaseGroupedPicker } from '../components/PhaseGroupedPicker';
 import { PhotoCropDialog } from '../components/PhotoCropDialog';
 import { ProgressBar } from '../components/ProgressBar';
 import { uploadPhoto } from '../lib/api';
+import { filterValidPhaseItemIds } from '../lib/phaseGroups';
 import {
   deleteDog,
   deleteMostRecentMilestoneAttempt,
@@ -68,33 +70,32 @@ const OUTCOME_ICONS: Record<FinalOutcome, string> = {
 
 function EditReportForm({
   report,
+  currentPhase,
   locations,
   distractionTemplates,
   onCancel,
   onSaved,
 }: {
   report: TrainingReport;
+  currentPhase: Phase;
   locations: Location[];
   distractionTemplates: DistractionTemplate[];
   onCancel: () => void;
   onSaved: () => void;
 }) {
-  const skillsForPhase = useChecklistItems(report.phase);
-  const milestonesForPhase = useMilestoneTemplates(report.phase);
+  const skills = useChecklistItems();
+  const milestones = useMilestoneTemplates();
   const [redFlag, setRedFlag] = useState(report.redFlag);
   const [locationId, setLocationId] = useState(report.locationId ?? '');
   const [notes, setNotes] = useState(report.notes);
   const [sessionDate, setSessionDate] = useState(report.sessionDate);
-  // Filtered against this phase's skills/milestones at init — a report saved
-  // before phase was locked down (or otherwise corrupted) could carry ids
-  // from a different phase than its own, which would never show up as a
-  // checkbox here but would still round-trip back into storage on save
-  // otherwise.
+  // Keep valid historical selections from every phase while dropping ids for
+  // templates that have since been deleted.
   const [skillIds, setSkillIds] = useState<string[]>(() =>
-    report.skillIds.filter((id) => skillsForPhase.some((item) => item.id === id)),
+    filterValidPhaseItemIds(report.skillIds, skills),
   );
   const [milestoneIds, setMilestoneIds] = useState<string[]>(() =>
-    report.milestoneIds.filter((id) => milestonesForPhase.some((m) => m.id === id)),
+    filterValidPhaseItemIds(report.milestoneIds, milestones),
   );
   const [distractionSeverities, setDistractionSeverities] = useState<
     Record<string, DistractionSeverity | ''>
@@ -117,10 +118,8 @@ function EditReportForm({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const validSkillIds = skillIds.filter((id) => skillsForPhase.some((item) => item.id === id));
-    const validMilestoneIds = milestoneIds.filter((id) =>
-      milestonesForPhase.some((m) => m.id === id),
-    );
+    const validSkillIds = filterValidPhaseItemIds(skillIds, skills);
+    const validMilestoneIds = filterValidPhaseItemIds(milestoneIds, milestones);
     const distractions = Object.entries(distractionSeverities)
       .filter((entry): entry is [string, DistractionSeverity] => entry[1] !== '')
       .map(([distractionId, severity]) => ({ distractionId, severity }));
@@ -165,31 +164,25 @@ function EditReportForm({
         {report.phase}{' '}
         <span className="text-xs text-gray-400">— phase is locked to the log's original phase</span>
       </p>
-      <div className="space-y-1">
+      <div>
         <p className="text-xs uppercase tracking-wide text-gray-500">Skills worked on</p>
-        {skillsForPhase.map((item) => (
-          <label key={item.id} className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={skillIds.includes(item.id)}
-              onChange={() => toggleSkill(item.id)}
-            />
-            {item.title}
-          </label>
-        ))}
+        <PhaseGroupedPicker
+          items={skills}
+          selectedIds={skillIds}
+          currentPhase={currentPhase}
+          itemKind="skills"
+          onToggle={toggleSkill}
+        />
       </div>
-      <div className="space-y-1">
+      <div>
         <p className="text-xs uppercase tracking-wide text-gray-500">Milestones worked on</p>
-        {milestonesForPhase.map((m) => (
-          <label key={m.id} className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={milestoneIds.includes(m.id)}
-              onChange={() => toggleMilestone(m.id)}
-            />
-            {m.title}
-          </label>
-        ))}
+        <PhaseGroupedPicker
+          items={milestones}
+          selectedIds={milestoneIds}
+          currentPhase={currentPhase}
+          itemKind="milestones"
+          onToggle={toggleMilestone}
+        />
       </div>
       <div className="space-y-1">
         <p className="text-xs uppercase tracking-wide text-gray-500">Distractions encountered</p>
@@ -1036,6 +1029,7 @@ export function DogProfile() {
                 >
                   <EditReportForm
                     report={r}
+                    currentPhase={dog.currentPhase}
                     locations={locations}
                     distractionTemplates={distractionTemplates}
                     onCancel={() => setEditingReportId(null)}
