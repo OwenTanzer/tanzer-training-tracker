@@ -45,7 +45,12 @@ import {
   dogHasTerminalFailure,
   isMilestoneOutcomeAllowed,
 } from '../lib/outcomeConfig';
-
+import {
+  isCurrentlyAssigned,
+  isDogNeedingAttention,
+  previousLocalDate,
+  sessionCountsByDogOnDate,
+} from '../lib/dailyWork';
 let db: Database = emptyDatabase();
 let currentInstructorId: string | null = null;
 let hydrated = false;
@@ -951,34 +956,29 @@ export function useDogMilestoneSessionCounts(dogId: string): Record<string, numb
   return counts;
 }
 
-function isLocalToday(date: string): boolean {
-  return date === localSessionDate();
-}
-
 function msUntilNextLocalMidnight(): number {
   const midnight = new Date();
   midnight.setHours(24, 0, 0, 0); // Date normalizes this to the next day's 00:00.
   return midnight.getTime() - Date.now();
 }
 
-// Worked-today (#47) is deliberately derived-only from the log itself, rather
-// than a stored flag — the log's createdDate is already the source of truth
-// for "was this dog worked with today," and a derived value can't drift out
-// of sync the way a manually-set/reset flag could. But "derived" only rolls
+// Daily work (#47) is deliberately derived from canonical sessionDate values,
+// rather than a resettable flag that can disagree with the training logs.
+// Counts therefore update when a report is added, deleted, or backdated and
+// cannot be manually hidden. The derived date only rolls
 // over on the next render — a tab left open across midnight with nothing
 // else triggering a render would otherwise keep showing yesterday's badge
 // indefinitely, so this schedules its own re-render for the next local
 // midnight (and the one after that, for as long as the component stays
 // mounted) purely to force that recomputation.
-export function useDogWorkedToday(dogId: string): boolean {
-  const reports = useDatabase().reports;
-  const [, setTick] = useState(0);
+function useCurrentLocalDate(): string {
+  const [date, setDate] = useState(localSessionDate);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     function scheduleNext() {
       timer = setTimeout(() => {
-        setTick((n) => n + 1);
+        setDate(localSessionDate());
         scheduleNext();
       }, msUntilNextLocalMidnight());
     }
@@ -986,7 +986,19 @@ export function useDogWorkedToday(dogId: string): boolean {
     return () => clearTimeout(timer);
   }, []);
 
-  return reports.some((r) => r.dogId === dogId && isLocalToday(r.sessionDate));
+  return date;
+}
+
+export function useDailySessionCounts(): Record<string, number> {
+  const reports = useDatabase().reports;
+  const today = useCurrentLocalDate();
+  // Report writes preserve the nested array reference, so derive this inexpensive
+  // count on every database render rather than caching against a stale reference.
+  return sessionCountsByDogOnDate(reports, today);
+}
+
+export function useDogSessionCountToday(dogId: string): number {
+  return useDailySessionCounts()[dogId] ?? 0;
 }
 
 export function useRedFlaggedReports(): TrainingReport[] {
@@ -1734,7 +1746,7 @@ export interface TrainerHistoryStats {
   skillsWorkedOnTotal: number;
   mostWorkedSkills: SkillWorkedCount[];
   recentlyWorkedDogs: DogActivitySummary[];
-  dogsNotWorkedRecently: DogActivitySummary[];
+  dogsNeedingAttention: DogActivitySummary[];
   successRateOverall: SuccessRate;
   successRateRefined: SuccessRate;
   finalOutcomeCounts: FinalOutcomeCounts;
@@ -1746,8 +1758,6 @@ export interface TrainerHistoryStats {
   attemptHistory: { counts: FinalOutcomeCounts; dogCount: number };
   graduatedDogsList: Dog[];
 }
-
-const NOT_WORKED_RECENTLY_DAYS = 14;
 
 function daysAgoLocalDate(days: number): string {
   const d = new Date();
@@ -1770,6 +1780,7 @@ function computeSuccessRate(dogs: Dog[]): SuccessRate {
 
 export function useTrainerHistoryStats(): TrainerHistoryStats {
   const state = useDatabase();
+  const today = useCurrentLocalDate();
 
   return useMemo(() => {
     const { dogs, reports, checklistItems, dogMilestoneCompletions, milestoneTemplates, milestoneOutcomeAttempts } =
@@ -1858,15 +1869,15 @@ export function useTrainerHistoryStats(): TrainerHistoryStats {
         const dog = dogs.find((d) => d.id === dogId);
         return dog ? { dog, lastWorkedDate } : null;
       })
-      .filter((x): x is { dog: Dog; lastWorkedDate: string } => x !== null)
+      .filter((x): x is { dog: Dog; lastWorkedDate: string } =>
+        x !== null && isCurrentlyAssigned(x.dog))
       .sort((a, b) => b.lastWorkedDate.localeCompare(a.lastWorkedDate))
       .slice(0, 5);
 
-    const notWorkedCutoff = daysAgoLocalDate(NOT_WORKED_RECENTLY_DAYS);
-    const dogsNotWorkedRecently: DogActivitySummary[] = dogs
-      .filter((d) => !d.released && !d.graduated)
+    const yesterdaySessionCounts = sessionCountsByDogOnDate(reports, previousLocalDate(today));
+    const dogsNeedingAttention: DogActivitySummary[] = dogs
+      .filter((dog) => isDogNeedingAttention(dog, state.pinnedFolderId, yesterdaySessionCounts))
       .map((d) => ({ dog: d, lastWorkedDate: lastWorkedByDog.get(d.id) ?? null }))
-      .filter(({ lastWorkedDate }) => !lastWorkedDate || lastWorkedDate < notWorkedCutoff)
       .sort((a, b) => (a.lastWorkedDate ?? '').localeCompare(b.lastWorkedDate ?? ''));
 
     return {
@@ -1881,12 +1892,12 @@ export function useTrainerHistoryStats(): TrainerHistoryStats {
       skillsWorkedOnTotal,
       mostWorkedSkills,
       recentlyWorkedDogs,
-      dogsNotWorkedRecently,
+      dogsNeedingAttention,
       successRateOverall,
       successRateRefined,
       finalOutcomeCounts,
       attemptHistory,
       graduatedDogsList,
     };
-  }, [state]);
+  }, [state, today]);
 }

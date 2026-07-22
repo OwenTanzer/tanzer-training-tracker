@@ -8,6 +8,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MoveDialog } from '../components/MoveDialog';
+import { DailyWorkBadge } from '../components/DailyWorkStatus';
 import { PencilIcon, TrashIcon } from '../components/icons';
 import { PhaseGroupedPicker } from '../components/PhaseGroupedPicker';
 import { PhotoCropDialog } from '../components/PhotoCropDialog';
@@ -41,7 +42,7 @@ import {
   useDogMilestoneCompletions,
   useDogMilestoneSessionCounts,
   useDogSkillSessionCounts,
-  useDogWorkedToday,
+  useDogSessionCountToday,
   useFolder,
   useLocations,
   useMilestoneAttempts,
@@ -435,7 +436,7 @@ export function DogProfile() {
   const milestoneCompletions = useDogMilestoneCompletions(dogId ?? '');
   const allReports = useReportsForDog(dogId ?? '');
   const sharedReports = useSharedReportsForDog(dogId ?? '');
-  const workedToday = useDogWorkedToday(dogId ?? '');
+  const sessionsToday = useDogSessionCountToday(dogId ?? '');
   const locations = useLocations();
   const distractionTemplates = useDistractionTemplates();
   const skillSessionCounts = useDogSkillSessionCounts(dogId ?? '');
@@ -690,14 +691,7 @@ export function DogProfile() {
               >
                 <PencilIcon />
               </button>
-              {workedToday && (
-                <span
-                  title="A training log was added for this dog today"
-                  className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
-                >
-                  Worked today
-                </span>
-              )}
+              <DailyWorkBadge count={sessionsToday} />
               {dog.excludedFromStats && (
                 <span
                   title="This dog is omitted from Trainer History's refined success rate"
