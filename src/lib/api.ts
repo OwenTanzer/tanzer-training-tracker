@@ -104,6 +104,7 @@ export interface AccountResponse {
   instructorId: string;
   name: string;
   profilePhotoUrl: string | null;
+  trainerSince: string;
   createdAt: string;
 }
 
@@ -123,11 +124,13 @@ export interface AccountUpdateResponse {
   instructorId: string;
   name: string;
   profilePhotoUrl: string | null;
+  trainerSince: string;
 }
 
 export function updateAccount(patch: {
   name?: string;
   profilePhotoKey?: string | null;
+  trainerSince?: string;
 }): Promise<AccountUpdateResponse> {
   return request('/api/account', { method: 'PATCH', body: patch });
 }

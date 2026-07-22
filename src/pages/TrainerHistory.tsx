@@ -1,4 +1,5 @@
 import { calendarDateAtLocalNoon } from '../../shared/sessionDate';
+import { formatTrainerSince } from '../../shared/trainerSince';
 import { useState } from 'react';
 import { DailyWorkBadge } from '../components/DailyWorkStatus';
 import { dailyWorkSurfaceClass } from '../lib/dailyWork';
@@ -53,17 +54,6 @@ function StatTile({
 function formatLastWorked(dateIso: string | null): string {
   if (!dateIso) return 'Never worked';
   return `Last worked ${calendarDateAtLocalNoon(dateIso).toLocaleDateString()}`;
-}
-
-// "Trainer since" is a cosmetic touch, not a system-of-record fact, so a
-// missing or unparsable date (e.g. a session persisted in localStorage
-// before this field existed) just quietly omits the line rather than
-// showing "Invalid Date" or crashing the page.
-function formatTrainerSince(createdAt: string | undefined): string | null {
-  if (!createdAt) return null;
-  const date = new Date(createdAt);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
 function SuccessRateCard({ rate }: { rate: SuccessRate }) {
@@ -133,7 +123,7 @@ export function TrainerHistory() {
   const dailySessionCounts = useDailySessionCounts();
   if (!session) return null;
 
-  const trainerSince = formatTrainerSince(session.createdAt);
+  const trainerSince = formatTrainerSince(session.trainerSince);
   const activeSuccessRate = refinedRate ? stats.successRateRefined : stats.successRateOverall;
 
   return (

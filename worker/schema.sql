@@ -26,6 +26,21 @@ CREATE TABLE IF NOT EXISTS instructor_data (
   updated_at TEXT NOT NULL
 );
 
+-- Profile metadata lives separately from account creation so tenure can be
+-- corrected without rewriting account audit timestamps. The INSERT backfills
+-- existing instructors once and is safe to rerun on every deploy.
+CREATE TABLE IF NOT EXISTS instructor_profiles (
+  instructor_id TEXT PRIMARY KEY REFERENCES instructors (id),
+  trainer_since TEXT NOT NULL CHECK (
+    length(trainer_since) = 7
+    AND substr(trainer_since, 5, 1) = '-'
+    AND substr(trainer_since, 6, 2) BETWEEN '01' AND '12'
+  )
+);
+
+INSERT OR IGNORE INTO instructor_profiles (instructor_id, trainer_since)
+SELECT id, substr(created_at, 1, 7) FROM instructors;
+
 -- The authoritative record of a pass-back transfer (#32/#34), written with a
 -- single-row INSERT rather than living only inside two opaque blob columns.
 -- Before this table existed, the transfer relation was hostage to whole-blob

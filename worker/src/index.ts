@@ -1,4 +1,5 @@
 import { legacySessionDate } from '../../shared/sessionDate';
+import { isTrainerSince, trainerSinceFromIso } from '../../shared/trainerSince';
 import { generateId, generateToken, hashPasscode, sessionExpiry, verifyPasscode } from './auth';
 import type { Env } from './types';
 
@@ -261,6 +262,9 @@ async function handleCreateInstructor(request: Request, env: Env): Promise<Respo
     env.DB.prepare(
       'INSERT INTO instructor_data (instructor_id, blob, updated_at) VALUES (?, ?, ?)',
     ).bind(id, EMPTY_BLOB, now),
+    env.DB.prepare(
+      'INSERT INTO instructor_profiles (instructor_id, trainer_since) VALUES (?, ?)',
+    ).bind(id, trainerSinceFromIso(now)),
   ]);
 
   const token = generateToken();
@@ -273,7 +277,15 @@ async function handleCreateInstructor(request: Request, env: Env): Promise<Respo
   return json(
     request,
     env,
-    { token, instructorId: id, name, profilePhotoUrl: null, createdAt: now, updatedAt: now },
+    {
+      token,
+      instructorId: id,
+      name,
+      profilePhotoUrl: null,
+      trainerSince: trainerSinceFromIso(now),
+      createdAt: now,
+      updatedAt: now,
+    },
     201,
   );
 }
@@ -285,7 +297,11 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
   if (!name || !passcode) return errorResponse(request, env, 'name and passcode are required', 400);
 
   const instructor = await env.DB.prepare(
-    'SELECT id, passcode_hash, passcode_salt, profile_photo_key, created_at FROM instructors WHERE name = ? COLLATE NOCASE',
+    `SELECT i.id, i.passcode_hash, i.passcode_salt, i.profile_photo_key, i.created_at,
+            COALESCE(p.trainer_since, substr(i.created_at, 1, 7)) AS trainer_since
+       FROM instructors i
+       LEFT JOIN instructor_profiles p ON p.instructor_id = i.id
+      WHERE i.name = ? COLLATE NOCASE`,
   )
     .bind(name)
     .first<{
@@ -293,6 +309,7 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
       passcode_hash: string;
       passcode_salt: string;
       profile_photo_key: string | null;
+      trainer_since: string;
       created_at: string;
     }>();
   if (!instructor) return errorResponse(request, env, 'Instructor not found', 404);
@@ -316,6 +333,7 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
       instructorId: instructor.id,
       name,
       profilePhotoUrl: photoUrlForKey(request, instructor.profile_photo_key),
+      trainerSince: instructor.trainer_since,
       createdAt: instructor.created_at,
     },
     200,
@@ -665,15 +683,26 @@ async function handleGetAccount(request: Request, env: Env): Promise<Response> {
   const auth = await requireAuth(request, env);
   if (auth instanceof Response) return auth;
 
-  const row = await env.DB.prepare('SELECT name, profile_photo_key FROM instructors WHERE id = ?')
+  const row = await env.DB.prepare(
+    `SELECT i.name, i.profile_photo_key,
+            COALESCE(p.trainer_since, substr(i.created_at, 1, 7)) AS trainer_since
+       FROM instructors i
+       LEFT JOIN instructor_profiles p ON p.instructor_id = i.id
+      WHERE i.id = ?`,
+  )
     .bind(auth)
-    .first<{ name: string; profile_photo_key: string | null }>();
+    .first<{ name: string; profile_photo_key: string | null; trainer_since: string }>();
   if (!row) return errorResponse(request, env, 'Instructor not found', 404);
 
   return json(
     request,
     env,
-    { instructorId: auth, name: row.name, profilePhotoUrl: photoUrlForKey(request, row.profile_photo_key) },
+    {
+      instructorId: auth,
+      name: row.name,
+      profilePhotoUrl: photoUrlForKey(request, row.profile_photo_key),
+      trainerSince: row.trainer_since,
+    },
     200,
   );
 }
@@ -682,7 +711,11 @@ async function handleUpdateAccount(request: Request, env: Env): Promise<Response
   const auth = await requireAuth(request, env);
   if (auth instanceof Response) return auth;
 
-  const body = await request.json<{ name?: string; profilePhotoKey?: string | null }>();
+  const body = await request.json<{
+    name?: string;
+    profilePhotoKey?: string | null;
+    trainerSince?: string;
+  }>();
   const updates: string[] = [];
   const values: unknown[] = [];
 
@@ -712,21 +745,49 @@ async function handleUpdateAccount(request: Request, env: Env): Promise<Response
     values.push(key);
   }
 
-  if (updates.length === 0) return errorResponse(request, env, 'Nothing to update', 400);
+  if (body.trainerSince !== undefined && !isTrainerSince(body.trainerSince)) {
+    return errorResponse(request, env, 'trainerSince must use YYYY-MM format', 400);
+  }
 
-  await env.DB.prepare(`UPDATE instructors SET ${updates.join(', ')} WHERE id = ?`)
-    .bind(...values, auth)
-    .run();
+  if (updates.length === 0 && body.trainerSince === undefined) {
+    return errorResponse(request, env, 'Nothing to update', 400);
+  }
 
-  const row = await env.DB.prepare('SELECT name, profile_photo_key FROM instructors WHERE id = ?')
+  if (updates.length > 0) {
+    await env.DB.prepare(`UPDATE instructors SET ${updates.join(', ')} WHERE id = ?`)
+      .bind(...values, auth)
+      .run();
+  }
+
+  if (body.trainerSince !== undefined) {
+    await env.DB.prepare(
+      `INSERT INTO instructor_profiles (instructor_id, trainer_since) VALUES (?, ?)
+       ON CONFLICT(instructor_id) DO UPDATE SET trainer_since = excluded.trainer_since`,
+    )
+      .bind(auth, body.trainerSince)
+      .run();
+  }
+
+  const row = await env.DB.prepare(
+    `SELECT i.name, i.profile_photo_key,
+            COALESCE(p.trainer_since, substr(i.created_at, 1, 7)) AS trainer_since
+       FROM instructors i
+       LEFT JOIN instructor_profiles p ON p.instructor_id = i.id
+      WHERE i.id = ?`,
+  )
     .bind(auth)
-    .first<{ name: string; profile_photo_key: string | null }>();
+    .first<{ name: string; profile_photo_key: string | null; trainer_since: string }>();
   if (!row) return errorResponse(request, env, 'Instructor not found', 404);
 
   return json(
     request,
     env,
-    { instructorId: auth, name: row.name, profilePhotoUrl: photoUrlForKey(request, row.profile_photo_key) },
+    {
+      instructorId: auth,
+      name: row.name,
+      profilePhotoUrl: photoUrlForKey(request, row.profile_photo_key),
+      trainerSince: row.trainer_since,
+    },
     200,
   );
 }

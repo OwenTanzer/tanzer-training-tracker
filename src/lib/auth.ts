@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { trainerSinceFromIso } from '../../shared/trainerSince';
 import * as api from './api';
 
 export interface Session {
@@ -6,6 +7,7 @@ export interface Session {
   instructorId: string;
   name: string;
   profilePhotoUrl: string | null;
+  trainerSince: string;
   createdAt: string;
 }
 
@@ -14,7 +16,11 @@ const SESSION_KEY = 'abbys-dog-chej:session';
 function loadSession(): Session | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? (JSON.parse(raw) as Session) : null;
+    if (!raw) return null;
+    const stored = JSON.parse(raw) as Session;
+    stored.trainerSince ||=
+      typeof stored.createdAt === 'string' ? trainerSinceFromIso(stored.createdAt) : '';
+    return stored;
   } catch {
     return null;
   }
@@ -65,6 +71,7 @@ export async function login(name: string, passcode: string): Promise<void> {
     instructorId: res.instructorId,
     name: res.name,
     profilePhotoUrl: res.profilePhotoUrl,
+    trainerSince: res.trainerSince,
     createdAt: res.createdAt,
   };
   persistSession();
@@ -78,6 +85,7 @@ export async function createAccount(name: string, passcode: string): Promise<voi
     instructorId: res.instructorId,
     name: res.name,
     profilePhotoUrl: res.profilePhotoUrl,
+    trainerSince: res.trainerSince,
     createdAt: res.createdAt,
   };
   persistSession();
@@ -87,10 +95,11 @@ export async function createAccount(name: string, passcode: string): Promise<voi
 export async function updateAccount(patch: {
   name?: string;
   profilePhotoKey?: string | null;
+  trainerSince?: string;
 }): Promise<void> {
   const res = await api.updateAccount(patch);
   if (!session) return;
-  session = { ...session, name: res.name, profilePhotoUrl: res.profilePhotoUrl };
+  session = { ...session, name: res.name, profilePhotoUrl: res.profilePhotoUrl, trainerSince: res.trainerSince };
   persistSession();
   notify();
 }
@@ -110,7 +119,7 @@ export async function refreshAccount(): Promise<void> {
   // api.ts's 401 handler and the generation guard in store.ts's
   // hydrateFromServer.
   if (!session || session.token !== token) return;
-  session = { ...session, name: res.name, profilePhotoUrl: res.profilePhotoUrl };
+  session = { ...session, name: res.name, profilePhotoUrl: res.profilePhotoUrl, trainerSince: res.trainerSince };
   persistSession();
   notify();
 }
