@@ -9,6 +9,7 @@ import {
   deleteDog,
   deleteMostRecentMilestoneAttempt,
   deleteReport,
+  localDateFromIso,
   markDogGraduated,
   moveDog,
   reactivateDog,
@@ -83,6 +84,7 @@ function EditReportForm({
   const [redFlag, setRedFlag] = useState(report.redFlag);
   const [locationId, setLocationId] = useState(report.locationId ?? '');
   const [notes, setNotes] = useState(report.notes);
+  const [sessionDate, setSessionDate] = useState(report.sessionDate);
   // Filtered against this phase's skills/milestones at init — a report saved
   // before phase was locked down (or otherwise corrupted) could carry ids
   // from a different phase than its own, which would never show up as a
@@ -122,6 +124,12 @@ function EditReportForm({
     const distractions = Object.entries(distractionSeverities)
       .filter((entry): entry is [string, DistractionSeverity] => entry[1] !== '')
       .map(([distractionId, severity]) => ({ distractionId, severity }));
+    if (
+      sessionDate > localDateFromIso(new Date().toISOString()) &&
+      !confirm('This training date is in the future. Save it anyway?')
+    ) {
+      return;
+    }
     const persisted = updateReport(report.id, {
       phase: report.phase,
       redFlag,
@@ -131,6 +139,7 @@ function EditReportForm({
       skillIds: validSkillIds,
       milestoneIds: validMilestoneIds,
       distractions,
+      sessionDate,
     });
     if (!persisted) {
       setError(
@@ -143,6 +152,16 @@ function EditReportForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-2 text-sm">
+      <label className="block space-y-1">
+        <span className="text-xs uppercase tracking-wide text-gray-500">Training date</span>
+        <input
+          type="date"
+          value={sessionDate}
+          onChange={(e) => setSessionDate(e.target.value)}
+          required
+          className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
+        />
+      </label>
       <p className="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-2 py-1 text-gray-600 dark:text-gray-400">
         {report.phase}{' '}
         <span className="text-xs text-gray-400">— phase is locked to the log's original phase</span>
@@ -1033,7 +1052,7 @@ export function DogProfile() {
               >
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-medium">
-                    {r.phase} · {new Date(r.createdDate).toLocaleDateString()}
+                    {r.phase} · {new Date(`${r.sessionDate}T12:00:00`).toLocaleDateString()}
                   </span>
                   <div className="flex items-center gap-2">
                     <button
@@ -1133,7 +1152,7 @@ export function DogProfile() {
               >
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-medium">
-                    {r.phase} · {new Date(r.createdDate).toLocaleDateString()}
+                    {r.phase} · {new Date(`${r.sessionDate}T12:00:00`).toLocaleDateString()}
                   </span>
                   <span className="text-xs text-gray-500">
                     Logged by {r.authorInstructorName}

@@ -452,6 +452,16 @@ export function useDatabaseCounts(): DatabaseCounts {
 }
 
 const now = () => new Date().toISOString();
+
+export function localDateFromIso(iso: string): string {
+  const date = new Date(iso);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function todayLocalDate(): string {
+  return localDateFromIso(now());
+}
+
 const uid = () => crypto.randomUUID();
 
 function statusForProgress(progress: number): GraduationStatus {
@@ -872,7 +882,7 @@ export function deleteDog(id: string): void {
 export function useReportsForDog(dogId: string): TrainingReport[] {
   return useDatabase()
     .reports.filter((r) => r.dogId === dogId)
-    .sort((a, b) => b.createdDate.localeCompare(a.createdDate));
+    .sort((a, b) => b.sessionDate.localeCompare(a.sessionDate) || b.createdDate.localeCompare(a.createdDate));
 }
 
 // Read-only overlay of another instructor's shared reports on a pass-back
@@ -883,7 +893,7 @@ export function useReportsForDog(dogId: string): TrainingReport[] {
 export function useSharedReportsForDog(dogId: string): SharedReportView[] {
   return useSyncExternalStore(subscribe, () => sharedReports)
     .filter((r) => r.dogId === dogId)
-    .sort((a, b) => b.createdDate.localeCompare(a.createdDate));
+    .sort((a, b) => b.sessionDate.localeCompare(a.sessionDate) || b.createdDate.localeCompare(a.createdDate));
 }
 
 // Session counts (#35) are purely informational — derived from how many of a
@@ -915,14 +925,8 @@ export function useDogMilestoneSessionCounts(dogId: string): Record<string, numb
   return counts;
 }
 
-function isLocalToday(dateIso: string): boolean {
-  const d = new Date(dateIso);
-  const today = new Date();
-  return (
-    d.getFullYear() === today.getFullYear() &&
-    d.getMonth() === today.getMonth() &&
-    d.getDate() === today.getDate()
-  );
+function isLocalToday(date: string): boolean {
+  return date === todayLocalDate();
 }
 
 function msUntilNextLocalMidnight(): number {
@@ -956,13 +960,13 @@ export function useDogWorkedToday(dogId: string): boolean {
     return () => clearTimeout(timer);
   }, []);
 
-  return reports.some((r) => r.dogId === dogId && isLocalToday(r.createdDate));
+  return reports.some((r) => r.dogId === dogId && isLocalToday(r.sessionDate));
 }
 
 export function useRedFlaggedReports(): TrainingReport[] {
   return useDatabase()
     .reports.filter((r) => r.redFlag)
-    .sort((a, b) => b.createdDate.localeCompare(a.createdDate));
+    .sort((a, b) => b.sessionDate.localeCompare(a.sessionDate) || b.createdDate.localeCompare(a.createdDate));
 }
 
 export interface NewReportInput {
@@ -975,6 +979,7 @@ export interface NewReportInput {
   skillIds: string[];
   milestoneIds: string[];
   distractions: DistractionObservation[];
+  sessionDate: string;
 }
 
 function markSkillsInProgress(dogId: string, skillIds: string[]) {
@@ -1060,6 +1065,7 @@ export interface UpdateReportInput {
   skillIds: string[];
   milestoneIds: string[];
   distractions: DistractionObservation[];
+  sessionDate: string;
 }
 
 export function updateReport(id: string, updates: UpdateReportInput): boolean {
@@ -1638,10 +1644,10 @@ export interface TrainerHistoryStats {
 
 const NOT_WORKED_RECENTLY_DAYS = 14;
 
-function daysAgoIso(days: number): string {
+function daysAgoLocalDate(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - days);
-  return d.toISOString();
+  return localDateFromIso(d.toISOString());
 }
 
 // Dogs still in progress (neither graduated nor released) never count toward
@@ -1715,10 +1721,10 @@ export function useTrainerHistoryStats(): TrainerHistoryStats {
       .filter((d) => d.graduated)
       .sort((a, b) => (b.graduatedDate ?? '').localeCompare(a.graduatedDate ?? ''));
 
-    const weekAgo = daysAgoIso(7);
-    const monthAgo = daysAgoIso(30);
-    const logsThisWeek = reports.filter((r) => r.createdDate >= weekAgo).length;
-    const logsThisMonth = reports.filter((r) => r.createdDate >= monthAgo).length;
+    const weekAgo = daysAgoLocalDate(7);
+    const monthAgo = daysAgoLocalDate(30);
+    const logsThisWeek = reports.filter((r) => r.sessionDate >= weekAgo).length;
+    const logsThisMonth = reports.filter((r) => r.sessionDate >= monthAgo).length;
 
     const milestonesCompleted = dogMilestoneCompletions.filter((c) => c.completed).length;
 
@@ -1742,7 +1748,7 @@ export function useTrainerHistoryStats(): TrainerHistoryStats {
     const lastWorkedByDog = new Map<string, string>();
     reports.forEach((r) => {
       const existing = lastWorkedByDog.get(r.dogId);
-      if (!existing || r.createdDate > existing) lastWorkedByDog.set(r.dogId, r.createdDate);
+      if (!existing || r.sessionDate > existing) lastWorkedByDog.set(r.dogId, r.sessionDate);
     });
 
     const recentlyWorkedDogs: DogActivitySummary[] = [...lastWorkedByDog.entries()]
@@ -1754,7 +1760,7 @@ export function useTrainerHistoryStats(): TrainerHistoryStats {
       .sort((a, b) => b.lastWorkedDate.localeCompare(a.lastWorkedDate))
       .slice(0, 5);
 
-    const notWorkedCutoff = daysAgoIso(NOT_WORKED_RECENTLY_DAYS);
+    const notWorkedCutoff = daysAgoLocalDate(NOT_WORKED_RECENTLY_DAYS);
     const dogsNotWorkedRecently: DogActivitySummary[] = dogs
       .filter((d) => !d.released && !d.graduated)
       .map((d) => ({ dog: d, lastWorkedDate: lastWorkedByDog.get(d.id) ?? null }))

@@ -120,6 +120,9 @@ export interface TrainingReport {
   // blob was self-authored.
   authorInstructorId: string | null;
   visibility: ReportVisibility;
+  // Domain date for the training session, kept separate from audit timestamps.
+  // A YYYY-MM-DD string avoids timezone shifts.
+  sessionDate: string;
   createdDate: string;
   updatedDate: string;
 }
@@ -149,6 +152,7 @@ export interface SharedReportView {
   milestoneLabels: string[];
   distractionLabels: { title: string; severity: DistractionSeverity }[];
   authorInstructorName: string;
+  sessionDate: string;
   createdDate: string;
   updatedDate: string;
 }

@@ -23,7 +23,7 @@ function RedFlaggedReport({ reportId }: { reportId: string }) {
         </button>
       </div>
       <p className="text-xs text-gray-500">
-        {report.phase} · {new Date(report.createdDate).toLocaleDateString()}
+        {report.phase} · {new Date(`${report.sessionDate}T12:00:00`).toLocaleDateString()}
         {location ? ` · 📍 ${location.name}` : ''}
       </p>
       {report.picture && (

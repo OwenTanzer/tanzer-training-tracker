@@ -67,6 +67,7 @@ interface BlobReport {
   distractions: BlobDistractionObservation[];
   authorInstructorId: string | null;
   visibility: string;
+  sessionDate?: string;
   createdDate: string;
   updatedDate: string;
 }
@@ -172,6 +173,7 @@ function resolveSharedReports(
           severity: d.severity,
         })),
         authorInstructorName: link.instructorName,
+        sessionDate: report.sessionDate ?? report.createdDate.slice(0, 10),
         createdDate: report.createdDate,
         updatedDate: report.updatedDate,
       });

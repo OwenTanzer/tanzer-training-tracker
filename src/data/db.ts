@@ -190,6 +190,11 @@ function backfillReports(
   reports: TrainingReport[],
   ownerInstructorId?: string,
 ): TrainingReport[] {
+  const localDateFromIso = (iso: string) => {
+    const date = new Date(iso);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  };
+
   return reports.map((report) => ({
     ...report,
     skillIds: report.skillIds ?? [],
@@ -197,6 +202,7 @@ function backfillReports(
     distractions: report.distractions ?? [],
     authorInstructorId: report.authorInstructorId ?? ownerInstructorId ?? null,
     visibility: report.visibility ?? (report.redFlag ? 'private' : 'shared'),
+    sessionDate: report.sessionDate ?? localDateFromIso(report.createdDate),
   }));
 }
 

@@ -5,6 +5,7 @@ import { compressImageToBlob } from '../lib/compressImage';
 import {
   createLocation,
   createReport,
+  localDateFromIso,
   useChecklistItems,
   useDistractionTemplates,
   useDog,
@@ -24,6 +25,7 @@ export function NewReport() {
   const [locationId, setLocationId] = useState('');
   const [newLocationName, setNewLocationName] = useState('');
   const [notes, setNotes] = useState('');
+  const [sessionDate, setSessionDate] = useState(() => localDateFromIso(new Date().toISOString()));
   // The photo is only uploaded to R2 on submit, not on selection — uploading
   // eagerly would leave an orphaned object in R2 whenever the user picks a
   // photo and then abandons the form without saving.
@@ -103,6 +105,12 @@ export function NewReport() {
       const distractions = Object.entries(distractionSeverities)
         .filter((entry): entry is [string, DistractionSeverity] => entry[1] !== '')
         .map(([distractionId, severity]) => ({ distractionId, severity }));
+      if (
+        sessionDate > localDateFromIso(new Date().toISOString()) &&
+        !confirm('This training date is in the future. Save it anyway?')
+      ) {
+        return;
+      }
       const { persisted } = createReport({
         dogId: dogId!,
         phase: dog!.currentPhase,
@@ -113,6 +121,7 @@ export function NewReport() {
         skillIds,
         milestoneIds,
         distractions,
+        sessionDate,
       });
       if (!persisted) {
         setSubmitError(
@@ -140,6 +149,23 @@ export function NewReport() {
       </h1>
 
       <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label
+            htmlFor="session-date"
+            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+          >
+            Training date
+          </label>
+          <input
+            id="session-date"
+            type="date"
+            value={sessionDate}
+            onChange={(e) => setSessionDate(e.target.value)}
+            required
+            className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2"
+          />
+          <p className="mt-1 text-xs text-gray-500">Defaults to today; select an earlier date for a historical log.</p>
+        </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Phase
