@@ -114,7 +114,7 @@ function FinalOutcomeBar({ counts }: { counts: FinalOutcomeCounts }) {
 export function TrainerHistory() {
   const stats = useTrainerHistoryStats();
   const session = useSession();
-  const [refinedRate, setRefinedRate] = useState(false);
+  const [refinedRate, setRefinedRate] = useState(true);
   const [showGraduatedList, setShowGraduatedList] = useState(false);
   const pinnedFolderId = usePinnedFolderId();
   const pinnedFolder = useFolder(pinnedFolderId);
@@ -170,9 +170,63 @@ export function TrainerHistory() {
       </div>
 
       <p className="text-sm text-gray-500">
-        A look back at your training career — every dog you've handled on this account. Other
-        instructors' data isn't included here.
+        Your assigned dogs and what needs attention today. Other instructors' data isn't included
+        here.
       </p>
+
+      <section className="space-y-2">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
+          Needs Attention
+        </h2>
+        {stats.dogsNeedingAttention.length === 0 && (
+          <p className="text-sm text-gray-400">
+            {pinnedFolderId ? 'Every currently assigned pinned dog was worked yesterday.' : 'Pin a folder to track which assigned dogs were not worked yesterday.'}
+          </p>
+        )}
+        <ul className="space-y-1">
+          {stats.dogsNeedingAttention.map(({ dog, lastWorkedDate }) => (
+            <li key={dog.id}>
+              <Link
+                to={`/dog/${dog.id}`}
+                className="flex items-center justify-between rounded-xl border border-amber-200 dark:border-amber-900 p-3 text-sm hover:border-amber-400"
+              >
+                <span className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
+                  {dog.name}
+                  <DailyWorkBadge count={dailySessionCounts[dog.id] ?? 0} />
+                </span>
+                <span className="text-xs text-amber-600 dark:text-amber-400">
+                  {formatLastWorked(lastWorkedDate)}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
+          Recently Worked
+        </h2>
+        {stats.recentlyWorkedDogs.length === 0 && (
+          <p className="text-sm text-gray-400">No recent logs for currently assigned dogs.</p>
+        )}
+        <ul className="space-y-1">
+          {stats.recentlyWorkedDogs.map(({ dog, lastWorkedDate }) => (
+            <li key={dog.id}>
+              <Link
+                to={`/dog/${dog.id}`}
+                className={`flex items-center justify-between rounded-xl border p-3 text-sm hover:border-sky-400 ${dailyWorkSurfaceClass(dailySessionCounts[dog.id] ?? 0)}`}
+              >
+                <span className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
+                  {dog.name}
+                  <DailyWorkBadge count={dailySessionCounts[dog.id] ?? 0} />
+                </span>
+                <span className="text-xs text-gray-500">{formatLastWorked(lastWorkedDate)}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
 
       {pinnedFolderId && pinnedFolder && (
         <section className="space-y-2">
@@ -259,35 +313,11 @@ export function TrainerHistory() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
-          Career Highlights
-        </h2>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <StatTile icon="📝" label="Training logs" value={stats.totalLogs} />
-          <StatTile icon="📅" label="Logs this week" value={stats.logsThisWeek} />
-          <StatTile icon="🗓️" label="Logs this month" value={stats.logsThisMonth} />
-          <StatTile icon="🏁" label="Milestones completed" value={stats.milestonesCompleted} />
-          <StatTile icon="⭐" label="Skills worked on (total)" value={stats.skillsWorkedOnTotal} />
-        </div>
-      </section>
-
-      <section className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
             Success Rate
           </h2>
           <div className="flex gap-1 text-xs">
-            <button
-              type="button"
-              onClick={() => setRefinedRate(false)}
-              className={
-                !refinedRate
-                  ? 'rounded-md bg-sky-500 px-2 py-1 font-medium text-white'
-                  : 'rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800'
-              }
-            >
-              Overall
-            </button>
             <button
               type="button"
               onClick={() => setRefinedRate(true)}
@@ -299,6 +329,17 @@ export function TrainerHistory() {
               }
             >
               Refined
+            </button>
+            <button
+              type="button"
+              onClick={() => setRefinedRate(false)}
+              className={
+                !refinedRate
+                  ? 'rounded-md bg-sky-500 px-2 py-1 font-medium text-white'
+                  : 'rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800'
+              }
+            >
+              Overall
             </button>
           </div>
         </div>
@@ -325,82 +366,6 @@ export function TrainerHistory() {
             retakes on repeatable milestones.
           </p>
         )}
-      </section>
-
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
-          Skills You've Worked Most
-        </h2>
-        {stats.mostWorkedSkills.length === 0 && (
-          <p className="text-sm text-gray-400">No skills logged as worked on yet.</p>
-        )}
-        <ul className="space-y-1">
-          {stats.mostWorkedSkills.map((s) => (
-            <li
-              key={s.checklistItemId}
-              className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-700 p-3 text-sm"
-            >
-              <span className="text-gray-800 dark:text-gray-200">
-                {s.title} <span className="text-xs text-gray-400">· {s.phase}</span>
-              </span>
-              <span className="text-xs text-gray-500">{s.count}×</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
-          Recently Worked
-        </h2>
-        {stats.recentlyWorkedDogs.length === 0 && (
-          <p className="text-sm text-gray-400">No recent logs for currently assigned dogs.</p>
-        )}
-        <ul className="space-y-1">
-          {stats.recentlyWorkedDogs.map(({ dog, lastWorkedDate }) => (
-            <li key={dog.id}>
-              <Link
-                to={`/dog/${dog.id}`}
-                className={`flex items-center justify-between rounded-xl border p-3 text-sm hover:border-sky-400 ${dailyWorkSurfaceClass(dailySessionCounts[dog.id] ?? 0)}`}
-              >
-                <span className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
-                  {dog.name}
-                  <DailyWorkBadge count={dailySessionCounts[dog.id] ?? 0} />
-                </span>
-                <span className="text-xs text-gray-500">{formatLastWorked(lastWorkedDate)}</span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
-          Needs Attention
-        </h2>
-        {stats.dogsNeedingAttention.length === 0 && (
-          <p className="text-sm text-gray-400">
-            {pinnedFolderId ? 'Every currently assigned pinned dog was worked yesterday.' : 'Pin a folder to track which assigned dogs were not worked yesterday.'}
-          </p>
-        )}
-        <ul className="space-y-1">
-          {stats.dogsNeedingAttention.map(({ dog, lastWorkedDate }) => (
-            <li key={dog.id}>
-              <Link
-                to={`/dog/${dog.id}`}
-                className="flex items-center justify-between rounded-xl border border-amber-200 dark:border-amber-900 p-3 text-sm hover:border-amber-400"
-              >
-                <span className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
-                  {dog.name}
-                  <DailyWorkBadge count={dailySessionCounts[dog.id] ?? 0} />
-                </span>
-                <span className="text-xs text-amber-600 dark:text-amber-400">
-                  {formatLastWorked(lastWorkedDate)}
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
       </section>
     </div>
   );
