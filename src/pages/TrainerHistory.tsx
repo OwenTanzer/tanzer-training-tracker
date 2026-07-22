@@ -1,9 +1,19 @@
 import { calendarDateAtLocalNoon } from '../../shared/sessionDate';
 import { formatTrainerSince } from '../../shared/trainerSince';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { DailyWorkBadge } from '../components/DailyWorkStatus';
 import { dailyWorkSurfaceClass } from '../lib/dailyWork';
 import { Link } from 'react-router-dom';
+import {
+  Dog as DogIcon,
+  Flag,
+  FolderOpen,
+  GraduationCap,
+  LogOut,
+  PawPrint,
+  Pin,
+  User,
+} from 'lucide-react';
 import {
   useDogsInFolder,
   useFolder,
@@ -21,14 +31,14 @@ function StatTile({
   value,
   onClick,
 }: {
-  icon: string;
+  icon: ReactNode;
   label: string;
   value: number;
   onClick?: () => void;
 }) {
   const content = (
     <>
-      <p className="text-xl">{icon}</p>
+      <p className="text-gray-400 dark:text-gray-500">{icon}</p>
       <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100">
         {value.toLocaleString()}
       </p>
@@ -130,7 +140,7 @@ export function TrainerHistory() {
     <div className="max-w-3xl mx-auto p-4 space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-4">
-          <div className="h-20 w-20 shrink-0 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-4xl">
+          <div className="h-20 w-20 shrink-0 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-400 dark:text-gray-500">
             {session.profilePhotoUrl ? (
               <img
                 src={session.profilePhotoUrl}
@@ -138,7 +148,7 @@ export function TrainerHistory() {
                 className="h-full w-full object-cover"
               />
             ) : (
-              '🧑‍🏫'
+              <User className="h-9 w-9" />
             )}
           </div>
           <div>
@@ -153,18 +163,18 @@ export function TrainerHistory() {
             </Link>
           </div>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 flex-col sm:flex-row gap-2">
           <Link
             to="/red-flags"
-            className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
+            className="flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
           >
-            🚩 Red Flags
+            <Flag className="h-4 w-4" /> Red Flags
           </Link>
           <Link
             to="/folders"
-            className="rounded-md bg-sky-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-600"
+            className="flex items-center gap-1.5 rounded-md bg-sky-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-600"
           >
-            📂 My Folders
+            <FolderOpen className="h-4 w-4" /> My Folders
           </Link>
         </div>
       </div>
@@ -231,8 +241,8 @@ export function TrainerHistory() {
       {pinnedFolderId && pinnedFolder && (
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
-              📌 {pinnedFolder.name}
+            <h2 className="flex items-center gap-1.5 text-sm font-medium uppercase tracking-wide text-gray-500">
+              <Pin className="h-3.5 w-3.5" /> {pinnedFolder.name}
             </h2>
             <Link
               to={`/folder/${pinnedFolder.id}`}
@@ -251,7 +261,7 @@ export function TrainerHistory() {
                   to={`/dog/${dog.id}`}
                   className={`flex items-center gap-2 rounded-xl border p-2 hover:border-sky-400 ${dailyWorkSurfaceClass(dailySessionCounts[dog.id] ?? 0)}`}
                 >
-                  <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-lg">
+                  <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-400 dark:text-gray-500">
                     {dog.profilePhoto ? (
                       <img
                         src={dog.profilePhoto}
@@ -259,7 +269,7 @@ export function TrainerHistory() {
                         className="h-full w-full object-cover"
                       />
                     ) : (
-                      '🐕'
+                      <DogIcon className="h-5 w-5" />
                     )}
                   </div>
                   <div className="min-w-0">
@@ -278,15 +288,19 @@ export function TrainerHistory() {
       <section className="space-y-2">
         <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">Your Dogs</h2>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <StatTile icon="🐕" label="Total dogs handled" value={stats.totalDogs} />
-          <StatTile icon="🐾" label="Active dogs" value={stats.activeDogs} />
           <StatTile
-            icon="🎓"
+            icon={<DogIcon className="h-5 w-5" />}
+            label="Total dogs handled"
+            value={stats.totalDogs}
+          />
+          <StatTile icon={<PawPrint className="h-5 w-5" />} label="Active dogs" value={stats.activeDogs} />
+          <StatTile
+            icon={<GraduationCap className="h-5 w-5" />}
             label="Graduated (tap for list)"
             value={stats.graduatedDogs}
             onClick={() => setShowGraduatedList((v) => !v)}
           />
-          <StatTile icon="👋" label="Released" value={stats.releasedDogs} />
+          <StatTile icon={<LogOut className="h-5 w-5" />} label="Released" value={stats.releasedDogs} />
         </div>
         {showGraduatedList && (
           <ul className="space-y-1">
