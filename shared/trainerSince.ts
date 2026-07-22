@@ -1,7 +1,13 @@
 const TRAINER_SINCE_PATTERN = /^(\d{4})-(0[1-9]|1[0-2])$/;
 
-export function isTrainerSince(value: string): boolean {
-  return TRAINER_SINCE_PATTERN.test(value);
+export function localCalendarMonth(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+export function isTrainerSince(value: string, currentMonth = localCalendarMonth()): boolean {
+  return TRAINER_SINCE_PATTERN.test(value) && value <= currentMonth;
 }
 
 export function trainerSinceFromIso(value: string): string {

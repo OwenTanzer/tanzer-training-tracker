@@ -746,7 +746,7 @@ async function handleUpdateAccount(request: Request, env: Env): Promise<Response
   }
 
   if (body.trainerSince !== undefined && !isTrainerSince(body.trainerSince)) {
-    return errorResponse(request, env, 'trainerSince must use YYYY-MM format', 400);
+    return errorResponse(request, env, 'trainerSince must be a valid month no later than the current month', 400);
   }
 
   if (updates.length === 0 && body.trainerSince === undefined) {

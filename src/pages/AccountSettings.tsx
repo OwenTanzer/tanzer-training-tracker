@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { localCalendarMonth } from '../../shared/trainerSince';
 import { PhotoCropDialog } from '../components/PhotoCropDialog';
 import { PencilIcon } from '../components/icons';
 import { ApiError, uploadPhoto } from '../lib/api';
@@ -150,6 +151,7 @@ export function AccountSettings() {
             id="trainer-since"
             type="month"
             required
+            max={localCalendarMonth()}
             value={trainerSince}
             onChange={(e) => setTrainerSince(e.target.value)}
             className="rounded-md border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:text-gray-100"
