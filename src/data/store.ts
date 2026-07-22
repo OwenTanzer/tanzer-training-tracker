@@ -1,3 +1,4 @@
+import { localSessionDate } from '../../shared/sessionDate';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type {
   Dog,
@@ -452,15 +453,6 @@ export function useDatabaseCounts(): DatabaseCounts {
 }
 
 const now = () => new Date().toISOString();
-
-export function localDateFromIso(iso: string): string {
-  const date = new Date(iso);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function todayLocalDate(): string {
-  return localDateFromIso(now());
-}
 
 const uid = () => crypto.randomUUID();
 
@@ -926,7 +918,7 @@ export function useDogMilestoneSessionCounts(dogId: string): Record<string, numb
 }
 
 function isLocalToday(date: string): boolean {
-  return date === todayLocalDate();
+  return date === localSessionDate();
 }
 
 function msUntilNextLocalMidnight(): number {
@@ -1647,7 +1639,7 @@ const NOT_WORKED_RECENTLY_DAYS = 14;
 function daysAgoLocalDate(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - days);
-  return localDateFromIso(d.toISOString());
+  return localSessionDate(d);
 }
 
 // Dogs still in progress (neither graduated nor released) never count toward

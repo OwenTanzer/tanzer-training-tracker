@@ -1,3 +1,4 @@
+import { isFutureSessionDate, localSessionDate } from '../../shared/sessionDate';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MoveDialog } from '../components/MoveDialog';
@@ -9,7 +10,6 @@ import {
   deleteDog,
   deleteMostRecentMilestoneAttempt,
   deleteReport,
-  localDateFromIso,
   markDogGraduated,
   moveDog,
   reactivateDog,
@@ -124,10 +124,8 @@ function EditReportForm({
     const distractions = Object.entries(distractionSeverities)
       .filter((entry): entry is [string, DistractionSeverity] => entry[1] !== '')
       .map(([distractionId, severity]) => ({ distractionId, severity }));
-    if (
-      sessionDate > localDateFromIso(new Date().toISOString()) &&
-      !confirm('This training date is in the future. Save it anyway?')
-    ) {
+    if (isFutureSessionDate(sessionDate)) {
+      setError('Training logs cannot be dated in the future.');
       return;
     }
     const persisted = updateReport(report.id, {
@@ -158,6 +156,7 @@ function EditReportForm({
           type="date"
           value={sessionDate}
           onChange={(e) => setSessionDate(e.target.value)}
+          max={localSessionDate()}
           required
           className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
         />

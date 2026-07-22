@@ -1,3 +1,4 @@
+import { isFutureSessionDate, localSessionDate } from '../../shared/sessionDate';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiError, uploadPhoto } from '../lib/api';
@@ -5,7 +6,6 @@ import { compressImageToBlob } from '../lib/compressImage';
 import {
   createLocation,
   createReport,
-  localDateFromIso,
   useChecklistItems,
   useDistractionTemplates,
   useDog,
@@ -25,7 +25,7 @@ export function NewReport() {
   const [locationId, setLocationId] = useState('');
   const [newLocationName, setNewLocationName] = useState('');
   const [notes, setNotes] = useState('');
-  const [sessionDate, setSessionDate] = useState(() => localDateFromIso(new Date().toISOString()));
+  const [sessionDate, setSessionDate] = useState(localSessionDate);
   // The photo is only uploaded to R2 on submit, not on selection — uploading
   // eagerly would leave an orphaned object in R2 whenever the user picks a
   // photo and then abandons the form without saving.
@@ -89,6 +89,10 @@ export function NewReport() {
     e.preventDefault();
     setSubmitError(null);
     setPictureError(null);
+    if (isFutureSessionDate(sessionDate)) {
+      setSubmitError('Training logs cannot be dated in the future.');
+      return;
+    }
     setSaving(true);
     try {
       let picture: string | null = uploadedPictureUrl;
@@ -105,12 +109,6 @@ export function NewReport() {
       const distractions = Object.entries(distractionSeverities)
         .filter((entry): entry is [string, DistractionSeverity] => entry[1] !== '')
         .map(([distractionId, severity]) => ({ distractionId, severity }));
-      if (
-        sessionDate > localDateFromIso(new Date().toISOString()) &&
-        !confirm('This training date is in the future. Save it anyway?')
-      ) {
-        return;
-      }
       const { persisted } = createReport({
         dogId: dogId!,
         phase: dog!.currentPhase,
@@ -163,6 +161,7 @@ export function NewReport() {
             onChange={(e) => setSessionDate(e.target.value)}
             required
             className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2"
+            max={localSessionDate()}
           />
           <p className="mt-1 text-xs text-gray-500">Defaults to today; select an earlier date for a historical log.</p>
         </div>

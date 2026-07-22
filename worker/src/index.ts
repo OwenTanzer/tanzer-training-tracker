@@ -1,3 +1,4 @@
+import { legacySessionDate } from '../../shared/sessionDate';
 import { generateId, generateToken, hashPasscode, sessionExpiry, verifyPasscode } from './auth';
 import type { Env } from './types';
 
@@ -173,7 +174,7 @@ function resolveSharedReports(
           severity: d.severity,
         })),
         authorInstructorName: link.instructorName,
-        sessionDate: report.sessionDate ?? report.createdDate.slice(0, 10),
+        sessionDate: report.sessionDate ?? legacySessionDate(report.createdDate),
         createdDate: report.createdDate,
         updatedDate: report.updatedDate,
       });
