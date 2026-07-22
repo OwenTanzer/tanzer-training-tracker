@@ -1756,13 +1756,6 @@ export function reorderDistractionTemplates(orderedIds: string[]): void {
 // from #32/#33/#34 (pass-back, configurable milestone outcomes), which
 // hasn't landed yet.
 
-export interface SkillWorkedCount {
-  checklistItemId: string;
-  title: string;
-  phase: Phase;
-  count: number;
-}
-
 export interface DogActivitySummary {
   dog: Dog;
   lastWorkedDate: string | null;
@@ -1788,12 +1781,6 @@ export interface TrainerHistoryStats {
   activeDogs: number;
   graduatedDogs: number;
   releasedDogs: number;
-  totalLogs: number;
-  logsThisWeek: number;
-  logsThisMonth: number;
-  milestonesCompleted: number;
-  skillsWorkedOnTotal: number;
-  mostWorkedSkills: SkillWorkedCount[];
   recentlyWorkedDogs: DogActivitySummary[];
   dogsNeedingAttention: DogActivitySummary[];
   successRateOverall: SuccessRate;
@@ -1806,12 +1793,6 @@ export interface TrainerHistoryStats {
   // milestones.
   attemptHistory: { counts: FinalOutcomeCounts; dogCount: number };
   graduatedDogsList: Dog[];
-}
-
-function daysAgoLocalDate(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return localSessionDate(d);
 }
 
 // Dogs still in progress (neither graduated nor released) never count toward
@@ -1832,7 +1813,7 @@ export function useTrainerHistoryStats(): TrainerHistoryStats {
   const today = useCurrentLocalDate();
 
   return useMemo(() => {
-    const { dogs, reports, checklistItems, dogMilestoneCompletions, milestoneTemplates, milestoneOutcomeAttempts } =
+    const { dogs, reports, dogMilestoneCompletions, milestoneTemplates, milestoneOutcomeAttempts } =
       state;
 
     const graduatedDogs = dogs.filter((d) => d.graduated).length;
@@ -1883,30 +1864,6 @@ export function useTrainerHistoryStats(): TrainerHistoryStats {
       .filter((d) => d.graduated)
       .sort((a, b) => (b.graduatedDate ?? '').localeCompare(a.graduatedDate ?? ''));
 
-    const weekAgo = daysAgoLocalDate(7);
-    const monthAgo = daysAgoLocalDate(30);
-    const logsThisWeek = reports.filter((r) => r.sessionDate >= weekAgo).length;
-    const logsThisMonth = reports.filter((r) => r.sessionDate >= monthAgo).length;
-
-    const milestonesCompleted = dogMilestoneCompletions.filter((c) => c.completed).length;
-
-    const skillCounts = new Map<string, number>();
-    let skillsWorkedOnTotal = 0;
-    reports.forEach((r) => {
-      r.skillIds.forEach((id) => {
-        skillCounts.set(id, (skillCounts.get(id) ?? 0) + 1);
-        skillsWorkedOnTotal += 1;
-      });
-    });
-    const mostWorkedSkills: SkillWorkedCount[] = [...skillCounts.entries()]
-      .map(([checklistItemId, count]) => {
-        const item = checklistItems.find((i) => i.id === checklistItemId);
-        return item ? { checklistItemId, title: item.title, phase: item.phase, count } : null;
-      })
-      .filter((x): x is SkillWorkedCount => x !== null)
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
-
     const lastWorkedByDog = new Map<string, string>();
     reports.forEach((r) => {
       const existing = lastWorkedByDog.get(r.dogId);
@@ -1934,12 +1891,6 @@ export function useTrainerHistoryStats(): TrainerHistoryStats {
       activeDogs,
       graduatedDogs,
       releasedDogs,
-      totalLogs: reports.length,
-      logsThisWeek,
-      logsThisMonth,
-      milestonesCompleted,
-      skillsWorkedOnTotal,
-      mostWorkedSkills,
       recentlyWorkedDogs,
       dogsNeedingAttention,
       successRateOverall,
