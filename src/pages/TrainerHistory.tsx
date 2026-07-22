@@ -1,10 +1,13 @@
 import { calendarDateAtLocalNoon } from '../../shared/sessionDate';
 import { useState } from 'react';
+import { DailyWorkBadge } from '../components/DailyWorkStatus';
+import { dailyWorkSurfaceClass } from '../lib/dailyWork';
 import { Link } from 'react-router-dom';
 import {
   useDogsInFolder,
   useFolder,
   usePinnedFolderId,
+  useDailySessionCounts,
   useTrainerHistoryStats,
   type FinalOutcomeCounts,
   type SuccessRate,
@@ -49,7 +52,7 @@ function StatTile({
 
 function formatLastWorked(dateIso: string | null): string {
   if (!dateIso) return 'Never worked';
-  return `Last worked ${new Date(dateIso).toLocaleDateString()}`;
+  return `Last worked ${calendarDateAtLocalNoon(dateIso).toLocaleDateString()}`;
 }
 
 // "Trainer since" is a cosmetic touch, not a system-of-record fact, so a
@@ -127,6 +130,7 @@ export function TrainerHistory() {
   const pinnedFolder = useFolder(pinnedFolderId);
   const pinnedDogs = useDogsInFolder(pinnedFolderId ?? '');
 
+  const dailySessionCounts = useDailySessionCounts();
   if (!session) return null;
 
   const trainerSince = formatTrainerSince(session.createdAt);
@@ -201,7 +205,7 @@ export function TrainerHistory() {
                 <Link
                   key={dog.id}
                   to={`/dog/${dog.id}`}
-                  className="flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 p-2 hover:border-sky-400"
+                  className={`flex items-center gap-2 rounded-xl border p-2 hover:border-sky-400 ${dailyWorkSurfaceClass(dailySessionCounts[dog.id] ?? 0)}`}
                 >
                   <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-lg">
                     {dog.profilePhoto ? (
@@ -214,9 +218,12 @@ export function TrainerHistory() {
                       '🐕'
                     )}
                   </div>
-                  <span className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {dog.name}
-                  </span>
+                  <div className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {dog.name}
+                    </span>
+                    <DailyWorkBadge count={dailySessionCounts[dog.id] ?? 0} />
+                  </div>
                 </Link>
               ))}
             </div>
@@ -354,19 +361,22 @@ export function TrainerHistory() {
 
       <section className="space-y-2">
         <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
-          Recently Worked With
+          Recently Worked
         </h2>
         {stats.recentlyWorkedDogs.length === 0 && (
-          <p className="text-sm text-gray-400">No training logs yet.</p>
+          <p className="text-sm text-gray-400">No recent logs for currently assigned dogs.</p>
         )}
         <ul className="space-y-1">
           {stats.recentlyWorkedDogs.map(({ dog, lastWorkedDate }) => (
             <li key={dog.id}>
               <Link
                 to={`/dog/${dog.id}`}
-                className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-700 p-3 text-sm hover:border-sky-400"
+                className={`flex items-center justify-between rounded-xl border p-3 text-sm hover:border-sky-400 ${dailyWorkSurfaceClass(dailySessionCounts[dog.id] ?? 0)}`}
               >
-                <span className="font-medium text-gray-900 dark:text-gray-100">{dog.name}</span>
+                <span className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
+                  {dog.name}
+                  <DailyWorkBadge count={dailySessionCounts[dog.id] ?? 0} />
+                </span>
                 <span className="text-xs text-gray-500">{formatLastWorked(lastWorkedDate)}</span>
               </Link>
             </li>
@@ -376,21 +386,24 @@ export function TrainerHistory() {
 
       <section className="space-y-2">
         <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
-          Could Use Some Attention
+          Needs Attention
         </h2>
-        {stats.dogsNotWorkedRecently.length === 0 && (
+        {stats.dogsNeedingAttention.length === 0 && (
           <p className="text-sm text-gray-400">
-            Every active dog has a training log from the last two weeks.
+            {pinnedFolderId ? 'Every currently assigned pinned dog was worked yesterday.' : 'Pin a folder to track which assigned dogs were not worked yesterday.'}
           </p>
         )}
         <ul className="space-y-1">
-          {stats.dogsNotWorkedRecently.map(({ dog, lastWorkedDate }) => (
+          {stats.dogsNeedingAttention.map(({ dog, lastWorkedDate }) => (
             <li key={dog.id}>
               <Link
                 to={`/dog/${dog.id}`}
                 className="flex items-center justify-between rounded-xl border border-amber-200 dark:border-amber-900 p-3 text-sm hover:border-amber-400"
               >
-                <span className="font-medium text-gray-900 dark:text-gray-100">{dog.name}</span>
+                <span className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
+                  {dog.name}
+                  <DailyWorkBadge count={dailySessionCounts[dog.id] ?? 0} />
+                </span>
                 <span className="text-xs text-amber-600 dark:text-amber-400">
                   {formatLastWorked(lastWorkedDate)}
                 </span>
