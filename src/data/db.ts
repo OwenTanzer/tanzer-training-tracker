@@ -2,6 +2,7 @@ import { legacySessionDate, storedLocalCalendarDate } from '../../shared/session
 import type {
   Dog,
   DogChecklistCompletion,
+  DogEvent,
   DogMilestoneCompletion,
   DistractionTemplate,
   Folder,
@@ -30,6 +31,7 @@ export interface Database {
   // that have never flagged a milestone repeatable.
   milestoneOutcomeAttempts: MilestoneOutcomeAttempt[];
   distractionTemplates: DistractionTemplate[];
+  dogEvents: DogEvent[];
   // One-time gate for migrateLegacyDefaultTemplates() (#30) — true means this
   // account's checklist/milestones either started on, or have already been
   // upgraded to, Abby's real defaults, so the migration must never touch them
@@ -57,6 +59,7 @@ export function emptyDatabase(): Database {
     dogMilestoneCompletions: [],
     milestoneOutcomeAttempts: [],
     distractionTemplates: [],
+    dogEvents: [],
     templatesMigratedToAbbyDefaults: true,
     pinnedFolderId: null,
   };
@@ -257,6 +260,7 @@ export function normalizeDatabase(
     database.milestoneOutcomeAttempts = database.milestoneOutcomeAttempts ?? [];
     // Accounts predating distraction templates (#36) won't have this field at all.
     database.distractionTemplates = database.distractionTemplates ?? [];
+    database.dogEvents = database.dogEvents ?? [];
     // Accounts persisted before #30 won't have this field at all — treat its
     // absence as "not yet migrated" so migrateLegacyDefaultTemplates() runs
     // for them exactly once.
@@ -286,6 +290,7 @@ export function normalizeDatabase(
     milestoneOutcomeAttempts:
       (parsed.milestoneOutcomeAttempts as MilestoneOutcomeAttempt[]) ?? [],
     distractionTemplates: (parsed.distractionTemplates as DistractionTemplate[]) ?? [],
+    dogEvents: (parsed.dogEvents as DogEvent[]) ?? [],
     templatesMigratedToAbbyDefaults: (parsed.templatesMigratedToAbbyDefaults as boolean | undefined) ?? false,
     pinnedFolderId: (parsed.pinnedFolderId as string | null | undefined) ?? null,
   };

@@ -9,6 +9,7 @@ import type {
   DistractionObservation,
   DistractionTemplate,
   DogChecklistCompletion,
+  DogEvent,
   DogMilestoneCompletion,
   FinalOutcome,
   Folder,
@@ -904,6 +905,7 @@ export function deleteDog(id: string): void {
   db.reports = db.reports.filter((r) => r.dogId !== id);
   db.completions = db.completions.filter((c) => c.dogId !== id);
   db.dogMilestoneCompletions = db.dogMilestoneCompletions.filter((c) => c.dogId !== id);
+  db.dogEvents = db.dogEvents.filter((event) => event.dogId !== id);
   notify();
   logEvent('Dog deleted', id);
 }
@@ -1649,6 +1651,53 @@ export function deleteMostRecentMilestoneAttempt(
     `dog ${dogId}, milestone ${milestoneTemplateId}, removed ${last.outcome}`,
   );
   return persisted;
+}
+
+// ---- Contextual dog events (#55) ----
+
+export function useDogEvents(dogId: string): DogEvent[] {
+  return useDatabase()
+    .dogEvents.filter((event) => event.dogId === dogId)
+    .sort(
+      (a, b) =>
+        a.eventDate.localeCompare(b.eventDate) || a.createdDate.localeCompare(b.createdDate),
+    );
+}
+
+export function createDogEvent(dogId: string, eventDate: string, label: string): DogEvent | null {
+  const normalizedLabel = label.trim();
+  if (!normalizedLabel || !isValidCalendarDate(eventDate)) return null;
+  const timestamp = now();
+  const event: DogEvent = {
+    id: uid(),
+    dogId,
+    eventDate,
+    label: normalizedLabel,
+    createdDate: timestamp,
+    updatedDate: timestamp,
+  };
+  db.dogEvents.push(event);
+  notify();
+  logEvent('Dog context event created', `dog ${dogId}, ${eventDate}: ${normalizedLabel}`);
+  return event;
+}
+
+export function updateDogEvent(id: string, eventDate: string, label: string): boolean {
+  const event = db.dogEvents.find((candidate) => candidate.id === id);
+  const normalizedLabel = label.trim();
+  if (!event || !normalizedLabel || !isValidCalendarDate(eventDate)) return false;
+  event.eventDate = eventDate;
+  event.label = normalizedLabel;
+  event.updatedDate = now();
+  const persisted = notify();
+  logEvent('Dog context event updated', `${id} -> ${eventDate}: ${normalizedLabel}`);
+  return persisted;
+}
+
+export function deleteDogEvent(id: string): void {
+  db.dogEvents = db.dogEvents.filter((event) => event.id !== id);
+  notify();
+  logEvent('Dog context event deleted', id);
 }
 
 // ---- Distraction Templates (global, shared across phases) (#36) ----

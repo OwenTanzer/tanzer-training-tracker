@@ -94,6 +94,18 @@ export interface Dog {
   updatedDate: string;
 }
 
+// A dated piece of context for interpreting a dog's longitudinal training
+// data (#55), such as surgery or the start of foster-home visits. The domain
+// date is independent from the audit timestamps.
+export interface DogEvent {
+  id: string;
+  dogId: string;
+  eventDate: string;
+  label: string;
+  createdDate: string;
+  updatedDate: string;
+}
+
 export interface DistractionObservation {
   distractionId: string;
   severity: DistractionSeverity;

@@ -18,6 +18,7 @@ const EMPTY_BLOB = JSON.stringify({
   completions: [],
   milestoneTemplates: [],
   dogMilestoneCompletions: [],
+  dogEvents: [],
 });
 
 // Minimal shapes for the specific blob fields this worker actually reads or

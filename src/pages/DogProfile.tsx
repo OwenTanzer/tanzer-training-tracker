@@ -7,6 +7,7 @@ import {
 } from '../../shared/sessionDate';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { DistractionAnalytics } from '../components/DistractionAnalytics';
 import { MoveDialog } from '../components/MoveDialog';
 import { DailyWorkBadge } from '../components/DailyWorkStatus';
 import { PencilIcon, TrashIcon } from '../components/icons';
@@ -1129,6 +1130,12 @@ export function DogProfile() {
           )}
         </ul>
       </section>
+
+      <DistractionAnalytics
+        dogId={dog.id}
+        reports={allReports}
+        templates={distractionTemplates}
+      />
 
       <section className="space-y-2">
         <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
