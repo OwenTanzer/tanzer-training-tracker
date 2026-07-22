@@ -64,6 +64,10 @@ export interface Dog {
   graduationStatus: GraduationStatus;
   released: boolean;
   releasedDate: string | null;
+  // Distinguishes a terminal-outcome side effect from a deliberate manual
+  // release so configuration/outcome reconciliation never undoes the latter.
+  releasedByTerminalOutcome: boolean;
+
   // Distinct from a live graduationStatus of 'Graduated' reached by simply
   // completing everything that currently exists — this is the explicit,
   // deliberate "Mark Graduated" action (#31), and it freezes graduationProgress/
@@ -193,17 +197,18 @@ export interface MilestoneTemplate {
   phase: Phase;
   title: string;
   sortOrder: number;
-  // Marks this milestone as the terminal evaluation whose result decides a
-  // dog's outcome (e.g. Abby's "Advanced Final Blindfold") — at most one
-  // milestone typically carries this per curriculum, but nothing enforces
-  // that; it's the trainer's own curriculum to configure. A flagged
-  // milestone gets an outcome picker (Placement Ready / Additional
-  // Objectives / Fail) on the dog profile instead of a plain checkbox.
+  // Enables a generic outcome prompt for this milestone. Any number of
+  // milestones may collect outcomes; isTerminalOutcomeMilestone separately
+  // selects the single prompt used for aggregate analytics and auto-release.
   isFinalOutcomeMilestone: boolean;
   // Outcomes offered for future decisions while the prompt is enabled.
   // Existing completions and attempts may retain a value removed from this
   // list; configuration changes never rewrite dog history.
   allowedOutcomes: FinalOutcome[];
+  // The single outcome prompt used for aggregate trainer analytics and
+  // automatic release behavior. Other milestones may still collect generic
+  // outcomes without being treated as the dog's terminal evaluation.
+  isTerminalOutcomeMilestone: boolean;
 
   // Only meaningful alongside isFinalOutcomeMilestone (#33): most milestones
   // are a one-time decision, overwritten in place if corrected — a plain
@@ -233,9 +238,9 @@ export interface DogMilestoneCompletion {
   notes: string | null;
   photo: string | null;
   // Only meaningful for a completion of a milestone flagged
-  // isFinalOutcomeMilestone. 'Fail' auto-releases the dog; the other two
-  // outcomes never have a side effect beyond recording the result and (for
-  // Placement Ready) completing the milestone itself. Always mirrors the
+  // isFinalOutcomeMilestone. 'Fail' auto-releases only when the template is
+  // also the terminal outcome milestone; generic prompts only record their
+  // result. Placement Ready completes the milestone. Always mirrors the
   // *latest* MilestoneOutcomeAttempt for a repeatable milestone (#33) — this
   // is deliberately still the single field every other reader (graduation
   // progress, Trainer History's stats) uses, so "current outcome" behavior

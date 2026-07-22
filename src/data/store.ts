@@ -41,6 +41,8 @@ import { dataUrlToBlob } from '../lib/compressImage';
 import {
   backfillAllowedOutcomes,
   canonicalAllowedOutcomes,
+  countTerminalOutcomes,
+  dogHasTerminalFailure,
   isMilestoneOutcomeAllowed,
 } from '../lib/outcomeConfig';
 
@@ -654,6 +656,7 @@ export function createDog(
     graduationStatus: 'Not Started',
     released: false,
     releasedDate: null,
+    releasedByTerminalOutcome: false,
     graduated: false,
     graduatedDate: null,
     excludedFromStats: false,
@@ -743,6 +746,7 @@ export function releaseDog(id: string): boolean {
   if (dog.graduated) return false;
   dog.released = true;
   dog.releasedDate = now();
+  dog.releasedByTerminalOutcome = false;
   dog.updatedDate = now();
   const persisted = notify();
   logEvent('Dog released', id);
@@ -754,6 +758,7 @@ export function reactivateDog(id: string): boolean {
   if (!dog) return false;
   dog.released = false;
   dog.releasedDate = null;
+  dog.releasedByTerminalOutcome = false;
   dog.updatedDate = now();
   const persisted = notify();
   logEvent('Dog reactivated', id);
@@ -1264,6 +1269,7 @@ export function createMilestoneTemplate(phase: Phase, title: string): MilestoneT
     title,
     sortOrder: siblingCount,
     isFinalOutcomeMilestone: false,
+    isTerminalOutcomeMilestone: false,
     allowedOutcomes: backfillAllowedOutcomes(),
     repeatable: false,
     createdDate: now(),
@@ -1284,10 +1290,30 @@ export function renameMilestoneTemplate(id: string, title: string): boolean {
   return notify();
 }
 
-// Marks (or unmarks) a milestone as the terminal evaluation whose result
-// decides a dog's outcome — e.g. Abby's "Advanced Final Blindfold". Nothing
-// stops more than one milestone carrying this at once; it's the trainer's
-// own curriculum to configure, same as everything else in this file.
+function reconcileTerminalOutcomeReleases(): void {
+  db.dogs.forEach((dog) => {
+    const shouldBeReleased = dogHasTerminalFailure(
+      dog.id,
+      db.dogMilestoneCompletions,
+      db.milestoneTemplates,
+    );
+    if (shouldBeReleased && !dog.graduated) {
+      const wasReleased = dog.released;
+      dog.released = true;
+      dog.releasedDate ??= now();
+      if (!wasReleased) dog.releasedByTerminalOutcome = true;
+      dog.updatedDate = now();
+    } else if (dog.releasedByTerminalOutcome) {
+      dog.released = false;
+      dog.releasedDate = null;
+      dog.releasedByTerminalOutcome = false;
+      dog.updatedDate = now();
+    }
+  });
+}
+
+// Enables a generic outcome prompt on any milestone. Terminal analytics and
+// auto-release are configured separately, with at most one terminal prompt.
 export function toggleMilestoneFinalOutcomeFlag(id: string): boolean {
   const template = db.milestoneTemplates.find((m) => m.id === id);
   if (!template) return false;
@@ -1295,11 +1321,34 @@ export function toggleMilestoneFinalOutcomeFlag(id: string): boolean {
   template.updatedDate = now();
   if (template.isFinalOutcomeMilestone) {
     template.allowedOutcomes = backfillAllowedOutcomes(template.allowedOutcomes);
+  } else if (template.isTerminalOutcomeMilestone) {
+    template.isTerminalOutcomeMilestone = false;
+    reconcileTerminalOutcomeReleases();
   }
   const persisted = notify();
   logEvent(
     'Milestone final-outcome flag toggled',
     `${id} -> ${template.isFinalOutcomeMilestone}`,
+  );
+  return persisted;
+}
+
+// Selects the one prompt that drives aggregate analytics and auto-release.
+// Other prompted milestones remain generic outcome records.
+export function toggleMilestoneTerminalOutcome(id: string): boolean {
+  const template = db.milestoneTemplates.find((m) => m.id === id);
+  if (!template?.isFinalOutcomeMilestone) return false;
+  const turningOn = !template.isTerminalOutcomeMilestone;
+  db.milestoneTemplates.forEach((milestone) => {
+    milestone.isTerminalOutcomeMilestone = false;
+  });
+  template.isTerminalOutcomeMilestone = turningOn;
+  template.updatedDate = now();
+  reconcileTerminalOutcomeReleases();
+  const persisted = notify();
+  logEvent(
+    'Milestone terminal outcome toggled',
+    `${id} -> ${template.isTerminalOutcomeMilestone}`,
   );
   return persisted;
 }
@@ -1483,16 +1532,25 @@ function applyMilestoneOutcomeState(
   // release/reactivate in the caller's single atomic write/sync, and the
   // same "graduated dogs can't be released" guard still applies.
   const dog = db.dogs.find((d) => d.id === dogId);
-  if (outcome === 'Fail' && dog && !dog.graduated) {
+  const template = db.milestoneTemplates.find((m) => m.id === milestoneTemplateId);
+  if (outcome === 'Fail' && template?.isTerminalOutcomeMilestone && dog && !dog.graduated) {
+    const wasReleased = dog.released;
     dog.released = true;
-    dog.releasedDate = now();
+    dog.releasedDate ??= now();
+    if (!wasReleased) dog.releasedByTerminalOutcome = true;
     dog.updatedDate = now();
-  } else if (previousOutcome === 'Fail' && outcome !== 'Fail' && dog && dog.released) {
+  } else if (
+    previousOutcome === 'Fail' &&
+    template?.isTerminalOutcomeMilestone &&
+    dog?.releasedByTerminalOutcome &&
+    !dogHasTerminalFailure(dogId, db.dogMilestoneCompletions, db.milestoneTemplates)
+  ) {
     // The release was a side effect of the prior Fail outcome — moving off
     // Fail (a correction, a new non-Fail attempt, or an undo) must undo it,
     // or the dog is left released while the UI shows a different outcome.
     dog.released = false;
     dog.releasedDate = null;
+    dog.releasedByTerminalOutcome = false;
     dog.updatedDate = now();
   }
 }
@@ -1724,25 +1782,22 @@ export function useTrainerHistoryStats(): TrainerHistoryStats {
     const successRateOverall = computeSuccessRate(dogs);
     const successRateRefined = computeSuccessRate(dogs.filter((d) => !d.excludedFromStats));
 
-    // Only completions on milestones *currently* flagged isFinalOutcomeMilestone
-    // count — otherwise outcomes recorded against a since-unflagged milestone
-    // (e.g. the trainer re-pointed the flag at a different milestone) would
-    // keep polluting a bar the UI labels as "the" final-outcome milestone.
-    const finalOutcomeMilestoneIds = new Set(
-      milestoneTemplates.filter((m) => m.isFinalOutcomeMilestone).map((m) => m.id),
+    // Aggregate only the single explicitly designated terminal milestone.
+    // Generic prompted milestones remain visible on dog records but cannot
+    // double-count a dog in the final-outcome analytics.
+    const terminalOutcomeMilestoneIds = new Set(
+      milestoneTemplates.filter((m) => m.isTerminalOutcomeMilestone).map((m) => m.id),
     );
-    const finalOutcomeCounts = dogMilestoneCompletions.reduce<FinalOutcomeCounts>(
-      (acc, c) => {
-        if (!finalOutcomeMilestoneIds.has(c.milestoneTemplateId)) return acc;
-        if (c.outcome === 'Placement Ready') acc.placementReady += 1;
-        else if (c.outcome === 'Additional Objectives') acc.additionalObjectives += 1;
-        else if (c.outcome === 'Fail') acc.fail += 1;
-        return acc;
-      },
-      { placementReady: 0, additionalObjectives: 0, fail: 0, total: 0 },
+    const terminalCounts = countTerminalOutcomes(
+      dogMilestoneCompletions,
+      milestoneTemplates,
     );
-    finalOutcomeCounts.total =
-      finalOutcomeCounts.placementReady + finalOutcomeCounts.additionalObjectives + finalOutcomeCounts.fail;
+    const finalOutcomeCounts: FinalOutcomeCounts = {
+      placementReady: terminalCounts['Placement Ready'],
+      additionalObjectives: terminalCounts['Additional Objectives'],
+      fail: terminalCounts.Fail,
+      total: terminalCounts['Placement Ready'] + terminalCounts['Additional Objectives'] + terminalCounts.Fail,
+    };
 
     // Every historical attempt, not just the latest per dog (contrast with
     // finalOutcomeCounts above) — same milestone filter, different source
@@ -1751,7 +1806,7 @@ export function useTrainerHistoryStats(): TrainerHistoryStats {
     const attemptDogIds = new Set<string>();
     const attemptCounts = milestoneOutcomeAttempts.reduce<FinalOutcomeCounts>(
       (acc, a) => {
-        if (!finalOutcomeMilestoneIds.has(a.milestoneTemplateId)) return acc;
+        if (!terminalOutcomeMilestoneIds.has(a.milestoneTemplateId)) return acc;
         attemptDogIds.add(a.dogId);
         if (a.outcome === 'Placement Ready') acc.placementReady += 1;
         else if (a.outcome === 'Additional Objectives') acc.additionalObjectives += 1;

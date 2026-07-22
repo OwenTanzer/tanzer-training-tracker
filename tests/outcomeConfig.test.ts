@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   backfillAllowedOutcomes,
   canonicalAllowedOutcomes,
+  countTerminalOutcomes,
+  dogHasTerminalFailure,
   isMilestoneOutcomeAllowed,
 } from '../src/lib/outcomeConfig.ts';
 import { FINAL_OUTCOMES, type MilestoneTemplate } from '../src/types.ts';
@@ -14,6 +16,7 @@ function milestone(overrides: Partial<MilestoneTemplate> = {}): MilestoneTemplat
     title: 'Final evaluation',
     sortOrder: 0,
     isFinalOutcomeMilestone: true,
+    isTerminalOutcomeMilestone: true,
     allowedOutcomes: [...FINAL_OUTCOMES],
     repeatable: true,
     createdDate: '2026-01-01T00:00:00.000Z',
@@ -57,4 +60,31 @@ test('changing the allowed list does not mutate recorded attempts', () => {
   canonicalAllowedOutcomes(['Additional Objectives']);
 
   assert.deepEqual(attempts, snapshot);
+});
+
+test('generic prompt outcomes do not affect terminal analytics or release', () => {
+  const terminal = milestone({ id: 'terminal' });
+  const generic = milestone({
+    id: 'generic',
+    isTerminalOutcomeMilestone: false,
+  });
+  const records = [
+    { dogId: 'dog-1', milestoneTemplateId: generic.id, outcome: 'Fail' as const },
+    {
+      dogId: 'dog-1',
+      milestoneTemplateId: terminal.id,
+      outcome: 'Placement Ready' as const,
+    },
+  ];
+
+  assert.deepEqual(countTerminalOutcomes(records, [generic, terminal]), {
+    'Placement Ready': 1,
+    'Additional Objectives': 0,
+    Fail: 0,
+  });
+  assert.equal(dogHasTerminalFailure('dog-1', records, [generic, terminal]), false);
+  assert.equal(
+    dogHasTerminalFailure('dog-1', [{ ...records[1], outcome: 'Fail' }], [generic, terminal]),
+    true,
+  );
 });

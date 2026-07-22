@@ -1082,6 +1082,10 @@ export function DogProfile() {
                       </span>
                     )}
                   </div>
+                  <PreservedMilestoneAttemptHistory
+                    dogId={dog.id}
+                    milestone={m}
+                  />
                 </li>
               );
             }
@@ -1113,12 +1117,10 @@ export function DogProfile() {
                     Preserved outcome: {OUTCOME_ICONS[completion.outcome]} {completion.outcome}
                   </span>
                 )}
-                {m.repeatable && (
-                  <PreservedMilestoneAttemptHistory
-                    dogId={dog.id}
-                    milestone={m}
-                  />
-                )}
+                <PreservedMilestoneAttemptHistory
+                  dogId={dog.id}
+                  milestone={m}
+                />
               </li>
             );
           })}

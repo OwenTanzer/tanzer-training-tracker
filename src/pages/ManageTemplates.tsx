@@ -17,6 +17,7 @@ import {
   setMilestoneAllowedOutcomes,
   toggleMilestoneFinalOutcomeFlag,
   toggleMilestoneRepeatable,
+  toggleMilestoneTerminalOutcome,
   useChecklistItems,
   useDistractionTemplates,
   useMilestoneTemplates,
@@ -140,6 +141,18 @@ export function ManageTemplates() {
                     }`}
                   >
                     Repeatable: {item.repeatable ? 'On' : 'Off'}
+                  </button>
+                  <button
+                    type="button"
+                    title="Use this one milestone for trainer outcome analytics and automatic release on Fail"
+                    onClick={() => toggleMilestoneTerminalOutcome(item.id)}
+                    className={`rounded-md border px-2 py-1 text-xs font-medium ${
+                      item.isTerminalOutcomeMilestone
+                        ? 'border-violet-300 bg-violet-50 text-violet-600 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-400'
+                        : 'border-gray-300 text-gray-500 dark:border-gray-600'
+                    }`}
+                  >
+                    Terminal analytics: {item.isTerminalOutcomeMilestone ? 'On' : 'Off'}
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-2">

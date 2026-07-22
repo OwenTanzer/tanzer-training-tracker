@@ -14,7 +14,7 @@ import type {
 } from '../types';
 import { buildDefaultChecklist } from './defaultChecklist';
 import { buildDefaultMilestones } from './defaultMilestones';
-import { backfillAllowedOutcomes } from '../lib/outcomeConfig';
+import { backfillAllowedOutcomes, dogHasTerminalFailure } from '../lib/outcomeConfig';
 
 export interface Database {
   folders: Folder[];
@@ -101,6 +101,7 @@ function migrateLegacyMilestones(legacy: LegacyMilestone[]): {
           title: m.title,
           sortOrder: milestoneTemplates.length,
           isFinalOutcomeMilestone: false,
+          isTerminalOutcomeMilestone: false,
           allowedOutcomes: backfillAllowedOutcomes(),
           repeatable: false,
           createdDate: m.createdDate,
@@ -149,6 +150,7 @@ function backfillDogs(dogs: Dog[]): Dog[] {
       ...dog,
       released: dog.released ?? false,
       releasedDate: dog.releasedDate ?? null,
+      releasedByTerminalOutcome: dog.releasedByTerminalOutcome ?? false,
       graduated: dog.graduated ?? false,
       graduatedDate: dog.graduatedDate ? storedLocalCalendarDate(dog.graduatedDate) : null,
       excludedFromStats: dog.excludedFromStats ?? false,
@@ -163,9 +165,15 @@ function backfillDogs(dogs: Dog[]): Dog[] {
 // won't have those stored. An absent/invalid list preserves the legacy
 // behavior by allowing every outcome.
 function backfillMilestoneTemplates(templates: MilestoneTemplate[]): MilestoneTemplate[] {
-  return templates.map((template) => ({
+  return templates.map((template, index) => ({
     ...template,
     isFinalOutcomeMilestone: template.isFinalOutcomeMilestone ?? false,
+    isTerminalOutcomeMilestone:
+      (template.isTerminalOutcomeMilestone ?? template.isFinalOutcomeMilestone ?? false) &&
+      !templates.slice(0, index).some(
+        (earlier) =>
+          earlier.isTerminalOutcomeMilestone ?? earlier.isFinalOutcomeMilestone ?? false,
+      ),
     allowedOutcomes: backfillAllowedOutcomes(template.allowedOutcomes),
     repeatable: template.repeatable ?? false,
   }));
@@ -233,6 +241,14 @@ export function normalizeDatabase(
     database.dogMilestoneCompletions = backfillDogMilestoneCompletions(
       database.dogMilestoneCompletions ?? [],
     );
+    database.dogs.forEach((dog) => {
+      if (
+        dog.released &&
+        dogHasTerminalFailure(dog.id, database.dogMilestoneCompletions, database.milestoneTemplates)
+      ) {
+        dog.releasedByTerminalOutcome = true;
+      }
+    });
     // Accounts predating repeatable milestones (#33) won't have this field
     // at all — no migration needed here, since a milestone can only ever
     // have accumulated ledger rows after being flagged repeatable, which
