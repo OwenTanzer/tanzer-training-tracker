@@ -1,3 +1,4 @@
+import { SyncEngine, copy, equal, type Conflict, type Document, type Status } from '../lib/sync';
 import { dogStatistics, milestoneStatistics, type MilestoneStats } from '../lib/milestoneAnalytics';
 import {
   isFutureSessionDate,
@@ -30,6 +31,8 @@ import {
   hasLegacyContent,
   isLegacyDataClaimed,
   loadServerCache,
+  loadOutbox,
+  saveOutbox,
   markLegacyDataClaimed,
   normalizeDatabase,
   peekLegacyDatabase,
@@ -39,7 +42,7 @@ import {
 import { buildDefaultChecklist } from './defaultChecklist';
 import { buildDefaultMilestones } from './defaultMilestones';
 import { logError, logEvent } from '../lib/diagnostics';
-import { ApiError, fetchData, putData, transferDog, uploadPhoto } from '../lib/api';
+import { ApiError, fetchData, putData, transferDog, uploadPhoto, getToken } from '../lib/api';
 import { dataUrlToBlob } from '../lib/compressImage';
 import {
   backfillAllowedOutcomes,
@@ -57,7 +60,7 @@ import {
 let db: Database = emptyDatabase();
 let currentInstructorId: string | null = null;
 let hydrated = false;
-let lastKnownUpdatedAt: string | null = null;
+let storeToken: string | null = null;
 // Server-computed, read-only overlay (#32/#34) — populated on every
 // hydrateFromServer(), never included in what notify()/syncToServer() PUTs
 // (it lives entirely outside `db`), so a recipient's own stored blob can
@@ -72,159 +75,113 @@ let sharedReports: SharedReportView[] = [];
 // account is now active.
 let generation = 0;
 
-export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
+export type SyncStatus = Status;
 let syncStatus: SyncStatus = 'idle';
-let syncInFlight = false;
-let pendingSync = false;
-
+let engine: SyncEngine | null = null;
+let syncConflicts: Conflict[] = [];
 const listeners = new Set<() => void>();
-
-function notifyListeners() {
-  listeners.forEach((listener) => listener());
-}
+function notifyListeners() { listeners.forEach((listener) => listener()); }
+const documentOf = (value: Database): Document => value as unknown as Document;
 
 function notify(): boolean {
-  // Store actions mutate nested arrays/objects in place for simplicity, but
-  // useSyncExternalStore relies on reference equality to detect changes —
-  // without this shallow clone, React can skip re-rendering after a mutation
-  // and the UI won't reflect the change until something else forces a render.
   db = { ...db };
-  let persistedLocally = true;
-  if (currentInstructorId) {
-    persistedLocally = saveServerCache(currentInstructorId, db, lastKnownUpdatedAt);
-    if (!persistedLocally) {
-      logError(
-        'Local cache save failed',
-        'Browser storage is likely full. Try removing an old photo or log, then save again.',
-      );
-    }
-  }
+  const saved = engine?.stage(documentOf(db)) ?? false;
+  syncStatus = engine?.status ?? 'storage-error';
+  if (!saved) logError('Local save failed', 'Keep this page open until your changes reach the server. Do not record the same log again.');
   notifyListeners();
-  syncToServer();
-  return persistedLocally;
+  return saved;
 }
+function syncToServer(): void { notify(); }
+export async function retrySync(): Promise<void> { await engine?.flush(); }
+export function resolveSyncConflict(index: number, side: 'local' | 'remote'): void { engine?.resolve(index, side); }
+export function useSyncConflicts(): Conflict[] { return useSyncExternalStore(subscribe, () => syncConflicts); }
+export function getStoreIdentity() { return { generation, instructorId: currentInstructorId }; }
+export function getSyncState() { return { status: syncStatus, conflicts: syncConflicts, blob: db }; }
 
-// The server holds one JSON blob per instructor. Rather than sending a PUT
-// per mutation (which would race against itself — two rapid edits could
-// send the same expectedUpdatedAt and the second would spuriously 409
-// against its own sibling, not a real cross-device conflict), in-flight
-// writes are serialized: at most one PUT runs at a time, and any mutation
-// that arrives while one is in flight just marks "there's newer state to
-// send" rather than firing a second concurrent request. When the in-flight
-// one finishes, the latest db/lastKnownUpdatedAt goes out next.
-function syncToServer(): void {
-  if (!hydrated) return;
-  if (syncInFlight) {
-    pendingSync = true;
-    return;
+let releaseAccountLock: (() => void) | null = null;
+let accountLockDone: Promise<unknown> = Promise.resolve();
+async function acquireAccountLock(instructorId: string, ownerGeneration: number): Promise<boolean> {
+  releaseAccountLock?.();
+  await accountLockDone;
+  if (ownerGeneration !== generation) return false;
+  if (typeof navigator === 'undefined' || !navigator.locks) {
+    if (typeof window === 'undefined') return true; // Non-browser test runtime.
+    throw new Error('This browser cannot safely coordinate saved changes. Open the app in an updated browser.');
   }
-  runSync();
+  return new Promise<boolean>((resolve, reject) => {
+    accountLockDone = navigator.locks.request(`training-tracker:${instructorId}`, { ifAvailable: true }, async lock => {
+      if (!lock || ownerGeneration !== generation) { resolve(false); return; }
+      await new Promise<void>(release => { releaseAccountLock = release; resolve(true); });
+    }).catch(reject);
+  });
 }
 
-function runSync(): void {
-  const myGeneration = generation;
-  syncInFlight = true;
-  syncStatus = 'syncing';
-  notifyListeners();
-  const blobSnapshot = db;
-  const expectedUpdatedAt = lastKnownUpdatedAt ?? undefined;
-  putData(blobSnapshot, expectedUpdatedAt)
-    .then((res) => {
-      if (myGeneration !== generation) return;
-      lastKnownUpdatedAt = res.updatedAt;
-      syncStatus = 'synced';
-      // notify()'s cache write happens synchronously at edit time, tagged
-      // with whatever lastKnownUpdatedAt was *before* this PUT — it can't
-      // know the new value this PUT is about to confirm. Re-saving here with
-      // the blob+updatedAt pair that's now actually confirmed keeps the
-      // cache from drifting stale relative to the server, which is what an
-      // offline-fallback recovery's next save depends on to avoid a false
-      // 409 (or, with an even staler cache, a blind overwrite).
-      if (currentInstructorId) saveServerCache(currentInstructorId, blobSnapshot, res.updatedAt);
-    })
-    .catch((err: unknown) => {
-      if (myGeneration !== generation) return;
-      syncStatus = 'error';
-      if (err instanceof ApiError && err.status === 409) {
-        logError(
-          'Changes not saved',
-          "Your data changed elsewhere (another tab or device) — reload the page before continuing so you don't lose recent changes.",
-        );
-      } else if (err instanceof ApiError && err.status === 401) {
-        logError('Signed out', 'Your session expired — log back in to keep syncing your changes.');
-      } else {
-        logError(
-          'Changes not synced yet',
-          'Could not reach the server. This change is saved on this device and will sync once back online.',
-        );
-      }
-    })
-    .finally(() => {
-      // A stale generation's request must not touch syncInFlight/pendingSync
-      // at all once a newer session has started — resetLocalStore() already
-      // reset both explicitly for the new generation, and by now they may
-      // correctly reflect a genuinely in-flight request of *its own*.
-      // Unconditionally clearing syncInFlight here would falsely "unlock"
-      // that request mid-flight, letting a second one for the same new
-      // session fire concurrently — exactly the same-account self-race this
-      // queue exists to prevent.
-      if (myGeneration !== generation) return;
-      syncInFlight = false;
-      notifyListeners();
-      if (pendingSync) {
-        pendingSync = false;
-        runSync();
-      }
-    });
-}
-
-export async function hydrateFromServer(instructorId: string): Promise<void> {
+export async function hydrateFromServer(instructorId: string, token: string | null = getToken()): Promise<void> {
+  const inMemory = currentInstructorId === instructorId ? engine?.envelope() : null;
   const myGeneration = ++generation;
+  engine?.stop();
+  const acquired = await acquireAccountLock(instructorId, myGeneration);
+  if (myGeneration !== generation) return;
+  if (!acquired) throw new Error('This account is open in another tab. Close that tab, then retry here so its pending changes stay safe.');
   currentInstructorId = instructorId;
-  try {
-    const { blob, updatedAt, sharedReports: sharedReportsResponse } = await fetchData();
-    // A newer session (another hydrate, or a logout) has since taken over —
-    // this response belongs to a session that's no longer active, so drop it
-    // rather than resurrecting its data (and instructorId) as if it were current.
+  storeToken = token;
+  const pending = inMemory ?? loadOutbox(instructorId);
+  const cached = loadServerCache(instructorId);
+  let remote: Awaited<ReturnType<typeof fetchData>> | null = null;
+  try { remote = await fetchData(token); }
+  catch (err) {
     if (myGeneration !== generation) return;
-    db = normalizeDatabase(blob as Record<string, unknown>, instructorId);
-    lastKnownUpdatedAt = updatedAt;
-    sharedReports = sharedReportsResponse as SharedReportView[];
-    hydrated = true;
-    syncStatus = 'synced';
-    pruneUnreachableLegacyData();
-    notifyListeners();
-  } catch (err) {
-    if (myGeneration !== generation) return;
-    // Offline fallback: fall back to this instructor's last-synced local
-    // cache rather than blocking entirely, but only for a genuine network
-    // failure — an auth error means the cache may belong to a session that's
-    // no longer valid, so surface that instead of silently showing stale data.
-    if (err instanceof ApiError && err.status === 0) {
-      const cached = loadServerCache(instructorId);
-      if (cached) {
-        db = cached.blob;
-        // Carrying over the updatedAt this cache was last confirmed against
-        // (not discarding it) is what keeps optimistic concurrency intact
-        // across an offline period — without it, the next edit's PUT would
-        // go out with expectedUpdatedAt undefined, which the Worker treats
-        // as an unconditional write, silently clobbering anything written
-        // by another device in the meantime instead of correctly 409-ing.
-        lastKnownUpdatedAt = cached.updatedAt;
-        // Shared history is a best-effort, online-only overlay — the local
-        // cache only ever mirrors this instructor's own blob, so there's
-        // nothing to fall back to here.
-        sharedReports = [];
-        hydrated = true;
-        syncStatus = 'error';
-        pruneUnreachableLegacyData();
-        logError('Showing offline copy', "Could not reach the server, so you're seeing this device's last synced copy.");
-        notifyListeners();
-        return;
-      }
-    }
-    throw err;
+    if (!(err instanceof ApiError) || err.status !== 0 || (!pending && !cached)) throw err;
   }
+  if (myGeneration !== generation) return;
+  const serverBlob = remote ? normalizeDatabase(remote.blob as Document, instructorId) : null;
+  // Old caches did not distinguish confirmed data from pending work. Treat
+  // their contents as additions/unknown edits, never infer deletions from
+  // their absence. Differences require a choice rather than discarding them.
+  const initial = pending ?? (cached ? {
+    base: {}, local: documentOf(cached.blob), revision: cached.updatedAt, batchId: crypto.randomUUID(),
+  } : { base: documentOf(serverBlob!), local: documentOf(serverBlob!), revision: remote!.updatedAt, batchId: crypto.randomUUID() });
+  engine = new SyncEngine({
+    read: async () => {
+      const response = await fetchData(token);
+      return { blob: documentOf(normalizeDatabase(response.blob as Document, instructorId)), updatedAt: response.updatedAt };
+    },
+    write: (blob, revision) => putData(blob, revision, token),
+    persist: (entry) => {
+      if (myGeneration !== generation) return false;
+      const saved = saveOutbox(instructorId, entry);
+      // Compatibility cache is only a convenience; outbox is authoritative.
+      if (saved) saveServerCache(instructorId, entry.local as unknown as Database, entry.revision);
+      return saved;
+    },
+    changed: (local, status, conflicts) => {
+      if (myGeneration !== generation) return;
+      db = copy(local) as unknown as Database;
+      syncStatus = status; syncConflicts = conflicts; notifyListeners();
+    },
+    diagnostic: (event, detail) => logEvent(event, detail),
+  }, initial);
+  db = copy(initial.local) as unknown as Database;
+  sharedReports = (remote?.sharedReports ?? []) as SharedReportView[];
+  hydrated = true;
+  if (remote) engine.reconcile({ blob: documentOf(serverBlob!), updatedAt: remote.updatedAt });
+  else { engine.status = 'pending'; engine.persist(); syncStatus = engine.status; }
+  pruneUnreachableLegacyData();
+  notifyListeners();
+  if (!engine.conflicts.length && !equal(engine.base, engine.local)) void engine.flush();
+}
+
+// iOS may suspend JavaScript in the background. Pending work survives there;
+// resume the queue when execution/connectivity resumes, without a new edit.
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => void retrySync());
+  window.addEventListener('pageshow', () => void retrySync());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void retrySync();
+  });
+  window.addEventListener('beforeunload', (event) => {
+    if (syncStatus === 'storage-error') { event.preventDefault(); event.returnValue = ''; }
+  });
 }
 
 // A brand-new account's server blob has empty checklist/milestone arrays —
@@ -232,6 +189,7 @@ export async function hydrateFromServer(instructorId: string): Promise<void> {
 // client seeds them once here (the same defaults a fresh local install has
 // always gotten via emptyDatabase()), right after the first successful hydrate.
 export function seedDefaultTemplatesIfEmpty(): void {
+  if (syncConflicts.length) return;
   if (db.checklistItems.length > 0 || db.milestoneTemplates.length > 0) return;
   const defaults = emptyDatabase();
   db = {
@@ -275,6 +233,7 @@ function sameSignature(a: string[], b: string[]): boolean {
 // orphaned (they stop rendering as checked off) once this runs. Accepted
 // deliberately — see #30.
 export function migrateLegacyDefaultTemplates(): void {
+  if (syncConflicts.length) return;
   if (db.templatesMigratedToAbbyDefaults) return;
   if (db.checklistItems.length === 0 && db.milestoneTemplates.length === 0) return; // handled by seed path above
 
@@ -383,45 +342,39 @@ async function migratePhotosToServer(source: Database): Promise<Database> {
   return { ...source, dogs, reports, dogMilestoneCompletions };
 }
 
-// Runs outside the normal serialized sync queue and awaits the PUT directly
-// (rather than the fire-and-forget syncToServer()) so the caller can show a
-// real success/failure result and only mark the legacy data claimed once
-// it's actually confirmed saved on the server.
+// Import joins the durable queue. Claim the legacy copy only after server
+// acknowledgement; preserve it while offline or awaiting conflict recovery.
 export async function importLegacyDatabase(legacy: Database): Promise<void> {
   const myGeneration = generation;
+  await retrySync();
+  if (myGeneration !== generation || syncStatus !== 'synced') throw new Error('Finish syncing existing changes before importing.');
+  const before = copy(db);
   const migrated = await migratePhotosToServer(legacy);
-  const expectedUpdatedAt = lastKnownUpdatedAt ?? undefined;
-  const { updatedAt } = await putData(migrated, expectedUpdatedAt);
-  // The session this import was started for is no longer active (e.g. the
-  // user logged out mid-upload) — the data landed on the server under that
-  // session's account, but applying it to *this* generation's local state
-  // would show one account's just-imported data under a different one.
-  if (myGeneration !== generation) return;
+  if (myGeneration !== generation) throw new Error('Account changed. Sign in to the original account before importing.');
+  if (!equal(before, db)) throw new Error('Data changed during import. Try importing again.');
   db = migrated;
-  lastKnownUpdatedAt = updatedAt;
-  syncStatus = 'synced';
-  if (currentInstructorId) saveServerCache(currentInstructorId, db, lastKnownUpdatedAt);
+  notify();
+  await retrySync();
+  if (myGeneration !== generation || syncStatus !== 'synced') throw new Error('Import is pending. Keep the original data until synchronization completes.');
   markLegacyDataClaimed();
   clearLegacyDatabase();
-  notifyListeners();
 }
 
 export function resetLocalStore(): void {
   generation++;
+  releaseAccountLock?.();
+  releaseAccountLock = null;
   db = emptyDatabase();
   currentInstructorId = null;
+  storeToken = null;
   hydrated = false;
-  lastKnownUpdatedAt = null;
   sharedReports = [];
   syncStatus = 'idle';
-  // A PUT belonging to the session being closed may still be in flight (its
-  // completion handlers are now moot — see the generation check in
-  // runSync()'s .finally()). Declaring the queue empty here, rather than
-  // leaving it to that request's own cleanup, means the next session starts
-  // with a genuinely clean slate instead of possibly waiting on (or being
-  // silently gated behind) a request nobody cares about anymore.
-  syncInFlight = false;
-  pendingSync = false;
+  // In-flight callbacks cannot apply to a newer account; pending work stays
+  // in this instructor’s outbox and resumes on a later sign-in.
+  engine?.stop();
+  engine = null;
+  syncConflicts = [];
   notifyListeners();
 }
 
@@ -687,17 +640,17 @@ export interface TransferDogResult {
 }
 
 // Creates a linked pass-back copy of this dog on another instructor's
-// account (#32/#34). An out-of-band await like importLegacyDatabase, not
-// the generic notify()/syncToServer() queue — the source blob was already
-// written server-side by the transfer endpoint itself, so re-PUTting it here
-// would just be a redundant, no-op write.
+// account (#32/#34). Flush pending edits first, then reconcile the server’s
+// transfer result with edits made while that request was in flight.
 export async function transferDogToInstructor(
   dogId: string,
   targetInstructorName: string,
   allowDuplicate = false,
 ): Promise<TransferDogResult> {
   const myGeneration = generation;
-  const response = await transferDog(dogId, targetInstructorName, allowDuplicate);
+  await retrySync();
+  if (myGeneration !== generation || syncStatus !== 'synced') throw new Error('Sync your pending changes before transferring a dog.');
+  const response = await transferDog(dogId, targetInstructorName, allowDuplicate, storeToken);
   const result: TransferDogResult = {
     alreadyLinked: response.alreadyLinked ?? false,
     instructorName: response.link.instructorName,
@@ -708,18 +661,9 @@ export async function transferDogToInstructor(
   // different one (same hazard hydrateFromServer/importLegacyDatabase guard).
   if (myGeneration !== generation) return result;
 
-  const dog = db.dogs.find((d) => d.id === dogId);
-  if (dog && !dog.passBackCopies.some((link) => link.linkId === response.link.linkId)) {
-    db = {
-      ...db,
-      dogs: db.dogs.map((d) =>
-        d.id === dogId ? { ...d, passBackCopies: [...d.passBackCopies, response.link] } : d,
-      ),
-    };
-  }
-  lastKnownUpdatedAt = response.updatedAt;
-  if (currentInstructorId) saveServerCache(currentInstructorId, db, lastKnownUpdatedAt);
-  notifyListeners();
+  // Transfer writes occur on the server. Reconcile them with any edits made
+  // while the request was in flight instead of stamping local data confirmed.
+  await engine?.refresh();
   logEvent(
     'Dog transferred',
     result.alreadyLinked
@@ -1065,9 +1009,16 @@ function recomputeDogSkillProgress(dogId: string): void {
 
 export function createReport(
   input: NewReportInput,
+  reportId: string = uid(),
 ): { report: TrainingReport; persisted: boolean } {
+  if (!db.dogs.some(d => d.id === input.dogId)) throw new Error('This dog is not in the active account. Reopen the correct dog before saving.');
+  const existing = db.reports.find((r) => r.id === reportId);
+  if (existing) {
+    if (existing.dogId !== input.dogId) throw new Error('This saved log belongs to another dog. Reopen the correct log.');
+    return { report: existing, persisted: updateReport(existing.id, input) };
+  }
   const report: TrainingReport = {
-    id: uid(),
+    id: reportId,
     ...input,
     authorInstructorId: currentInstructorId,
     visibility: input.redFlag ? 'private' : 'shared',

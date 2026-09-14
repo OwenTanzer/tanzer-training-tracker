@@ -1,11 +1,12 @@
 import { isFutureSessionDate, localSessionDate } from '../../shared/sessionDate';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PhaseGroupedPicker } from '../components/PhaseGroupedPicker';
 import { ApiError, uploadPhoto } from '../lib/api';
 import { compressImageToBlob } from '../lib/compressImage';
 import {
   createLocation,
+  getStoreIdentity,
   createReport,
   useChecklistItems,
   useDistractionTemplates,
@@ -18,6 +19,8 @@ import { DISTRACTION_SEVERITIES, type DistractionSeverity } from '../types';
 export function NewReport() {
   const { dogId } = useParams<{ dogId: string }>();
   const navigate = useNavigate();
+  const reportId = useRef(crypto.randomUUID());
+  const createdLocationId = useRef<string | null>(null);
   const dog = useDog(dogId);
   const locations = useLocations();
   const distractionTemplates = useDistractionTemplates();
@@ -97,15 +100,18 @@ export function NewReport() {
     setSaving(true);
     try {
       let picture: string | null = uploadedPictureUrl;
+      const owner = getStoreIdentity();
       if (pictureFile && !picture) {
         const blob = await compressImageToBlob(pictureFile);
         const uploaded = await uploadPhoto(blob);
         picture = uploaded.url;
         setUploadedPictureUrl(uploaded.url);
       }
-      let finalLocationId: string | null = locationId || null;
+      if (getStoreIdentity().generation !== owner.generation) throw new Error('Account changed while preparing this log. Return to the original account before saving.');
+      let finalLocationId: string | null = locationId || createdLocationId.current;
       if (!finalLocationId && newLocationName.trim()) {
         finalLocationId = createLocation(newLocationName.trim()).id;
+        createdLocationId.current = finalLocationId;
       }
       const distractions = Object.entries(distractionSeverities)
         .filter((entry): entry is [string, DistractionSeverity] => entry[1] !== '')
@@ -121,10 +127,10 @@ export function NewReport() {
         milestoneIds,
         distractions,
         sessionDate,
-      });
+      }, reportId.current);
       if (!persisted) {
         setSubmitError(
-          "This log didn't save — your browser's storage is likely full. Try removing an old photo or log, then save again.",
+          "This device could not store the log. Keep this form open; retrying Save updates this same log rather than creating another.",
         );
         return;
       }

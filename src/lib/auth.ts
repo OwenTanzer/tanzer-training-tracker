@@ -113,7 +113,7 @@ export async function updateAccount(patch: {
 export async function refreshAccount(): Promise<void> {
   if (!session) return;
   const token = session.token;
-  const res = await api.getAccount();
+  const res = await api.getAccount(token);
   // A logout or account switch mid-request must not let a stale response
   // overwrite whatever session is active now — mirrors the token check in
   // api.ts's 401 handler and the generation guard in store.ts's
@@ -135,3 +135,12 @@ export async function logout(): Promise<void> {
   persistSession();
   notify();
 }
+
+// Another tab can replace the shared token. Stop this tab's session without
+// removing the new tab's credentials or this account's durable pending work.
+if (typeof window !== 'undefined') window.addEventListener('storage', event => {
+  if ((event.key === SESSION_KEY || event.key === 'abbys-dog-chej:session-token' || event.key === null) && session && api.getToken() !== session.token) {
+    session = null;
+    notify();
+  }
+});

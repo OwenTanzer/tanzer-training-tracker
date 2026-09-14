@@ -1,3 +1,4 @@
+import type { Envelope } from '../lib/sync';
 import { legacySessionDate, storedLocalCalendarDate } from '../../shared/sessionDate';
 import type {
   Dog,
@@ -410,4 +411,18 @@ export function markLegacyDataClaimed(): void {
 // it's pure dead weight sitting between the device and its storage quota.
 export function clearLegacyDatabase(): void {
   localStorage.removeItem(STORAGE_KEY);
+}
+
+// One atomic write contains both the confirmed base and pending edits. Never
+// reconstruct pending work from the cache's revision alone.
+export function loadOutbox(instructorId: string): Envelope | null {
+  const raw = localStorage.getItem(`abbys-dog-chej:outbox:${instructorId}`);
+  if (!raw) return null;
+  const entry = JSON.parse(raw) as Envelope;
+  if (!entry.base || !entry.local || typeof entry.batchId !== 'string') throw new Error('Saved changes could not be read. Keep this browser data and contact support.');
+  return entry;
+}
+export function saveOutbox(instructorId: string, entry: Envelope): boolean {
+  try { localStorage.setItem(`abbys-dog-chej:outbox:${instructorId}`, JSON.stringify(entry)); return true; }
+  catch { return false; }
 }
