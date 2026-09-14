@@ -1,3 +1,4 @@
+import { dogStatistics, milestoneStatistics, type MilestoneStats } from '../lib/milestoneAnalytics';
 import {
   isFutureSessionDate,
   isValidCalendarDate,
@@ -17,6 +18,7 @@ import type {
   Location,
   MilestoneOutcomeAttempt,
   MilestoneTemplate,
+  MilestoneOutcomeOption,
   Phase,
   PhaseChecklistItem,
   SharedReportView,
@@ -41,9 +43,9 @@ import { ApiError, fetchData, putData, transferDog, uploadPhoto } from '../lib/a
 import { dataUrlToBlob } from '../lib/compressImage';
 import {
   backfillAllowedOutcomes,
-  canonicalAllowedOutcomes,
-  countTerminalOutcomes,
-  dogHasTerminalFailure,
+  applyOutcomeToCompletion,
+  outcomeOptions,
+  outcomeLabel,
   isMilestoneOutcomeAllowed,
 } from '../lib/outcomeConfig';
 import {
@@ -1284,7 +1286,8 @@ export function createMilestoneTemplate(phase: Phase, title: string): MilestoneT
     sortOrder: siblingCount,
     isFinalOutcomeMilestone: false,
     isTerminalOutcomeMilestone: false,
-    allowedOutcomes: backfillAllowedOutcomes(),
+    allowedOutcomes: [],
+    outcomeOptions: [],
     repeatable: false,
     createdDate: now(),
     updatedDate: now(),
@@ -1304,30 +1307,7 @@ export function renameMilestoneTemplate(id: string, title: string): boolean {
   return notify();
 }
 
-function reconcileTerminalOutcomeReleases(): void {
-  db.dogs.forEach((dog) => {
-    const shouldBeReleased = dogHasTerminalFailure(
-      dog.id,
-      db.dogMilestoneCompletions,
-      db.milestoneTemplates,
-    );
-    if (shouldBeReleased && !dog.graduated) {
-      const wasReleased = dog.released;
-      dog.released = true;
-      dog.releasedDate ??= now();
-      if (!wasReleased) dog.releasedByTerminalOutcome = true;
-      dog.updatedDate = now();
-    } else if (dog.releasedByTerminalOutcome) {
-      dog.released = false;
-      dog.releasedDate = null;
-      dog.releasedByTerminalOutcome = false;
-      dog.updatedDate = now();
-    }
-  });
-}
-
-// Enables a generic outcome prompt on any milestone. Terminal analytics and
-// auto-release are configured separately, with at most one terminal prompt.
+// Outcome prompts never change a dog's release/graduation state.
 export function toggleMilestoneFinalOutcomeFlag(id: string): boolean {
   const template = db.milestoneTemplates.find((m) => m.id === id);
   if (!template) return false;
@@ -1337,7 +1317,6 @@ export function toggleMilestoneFinalOutcomeFlag(id: string): boolean {
     template.allowedOutcomes = backfillAllowedOutcomes(template.allowedOutcomes);
   } else if (template.isTerminalOutcomeMilestone) {
     template.isTerminalOutcomeMilestone = false;
-    reconcileTerminalOutcomeReleases();
   }
   const persisted = notify();
   logEvent(
@@ -1347,24 +1326,23 @@ export function toggleMilestoneFinalOutcomeFlag(id: string): boolean {
   return persisted;
 }
 
-// Selects the one prompt that drives aggregate analytics and auto-release.
-// Other prompted milestones remain generic outcome records.
-export function toggleMilestoneTerminalOutcome(id: string): boolean {
+// Changes which choices are offered for future decisions. Existing dog
+// completions and repeatable-attempt history are deliberately untouched.
+export function saveMilestoneOutcomeOptions(
+  id: string,
+  offered: readonly MilestoneOutcomeOption[],
+): boolean {
   const template = db.milestoneTemplates.find((m) => m.id === id);
-  if (!template?.isFinalOutcomeMilestone) return false;
-  const turningOn = !template.isTerminalOutcomeMilestone;
-  db.milestoneTemplates.forEach((milestone) => {
-    milestone.isTerminalOutcomeMilestone = false;
-  });
-  template.isTerminalOutcomeMilestone = turningOn;
+  const options = offered.map((option) => ({ ...option, label: option.label.trim() }));
+  if (!template || options.some((option) => !option.id || !option.label) ||
+      new Set(options.map((o) => o.id)).size !== options.length ||
+      new Set(options.map((o) => o.label.toLocaleLowerCase())).size !== options.length) return false;
+  // Retain definitions for removed choices; IDs are never reused or remapped.
+  const retired = outcomeOptions(template).filter((old) => !options.some((o) => o.id === old.id));
+  template.outcomeOptions = [...options, ...retired];
+  template.allowedOutcomes = options.map((option) => option.id);
   template.updatedDate = now();
-  reconcileTerminalOutcomeReleases();
-  const persisted = notify();
-  logEvent(
-    'Milestone terminal outcome toggled',
-    `${id} -> ${template.isTerminalOutcomeMilestone}`,
-  );
-  return persisted;
+  return notify();
 }
 
 // Marks (or unmarks) a milestone as repeatable (#33). Turning it on runs a
@@ -1377,22 +1355,6 @@ export function toggleMilestoneTerminalOutcome(id: string): boolean {
 // those fall back to today's date and are flagged
 // migratedFromLegacyCompletion so the UI can say "date unknown (migrated)"
 // instead of presenting a fabricated date as fact.
-
-// Changes which choices are offered for future decisions. Existing dog
-// completions and repeatable-attempt history are deliberately untouched.
-export function setMilestoneAllowedOutcomes(
-  id: string,
-  outcomes: readonly FinalOutcome[],
-): boolean {
-  const template = db.milestoneTemplates.find((m) => m.id === id);
-  const allowedOutcomes = canonicalAllowedOutcomes(outcomes);
-  if (!template || allowedOutcomes.length === 0) return false;
-  template.allowedOutcomes = allowedOutcomes;
-  template.updatedDate = now();
-  const persisted = notify();
-  logEvent('Milestone allowed outcomes updated', `${id} -> ${allowedOutcomes.join(', ')}`);
-  return persisted;
-}
 
 export function toggleMilestoneRepeatable(id: string): boolean {
   const template = db.milestoneTemplates.find((m) => m.id === id);
@@ -1417,6 +1379,8 @@ export function toggleMilestoneRepeatable(id: string): boolean {
           dogId: c.dogId,
           milestoneTemplateId: id,
           outcome: c.outcome as FinalOutcome,
+          outcomeLabel: c.outcomeLabel ?? outcomeLabel(template, c.outcome!),
+          completedMilestone: c.completed,
           attemptDate: c.dateCompleted ?? now(),
           migratedFromLegacyCompletion: true,
           notes: null,
@@ -1520,70 +1484,30 @@ function findOrCreateMilestoneCompletion(
   return completion;
 }
 
-// Pure state mutation, shared by every public entry point below: sets the
-// completion's mirrored outcome/completed/dateCompleted, and applies or
-// reverts the Fail-driven auto-release side effect by diffing against
-// whatever the completion's outcome was a moment ago. Deliberately knows
-// nothing about the attempt ledger (#33) — a repeatable milestone's history
-// is a separate concern (event creation) from "what does this dog's current
-// completion say" (state mutation), and fusing the two here is exactly what
-// would let undoing an attempt immediately recreate it. No notify()/
-// logEvent — callers own persisting and describing their own distinct
-// action.
+// Shared single-decision / retake / undo mutation. Only milestone state is
+// touched; dog release and graduation remain explicit profile actions.
 function applyMilestoneOutcomeState(
   dogId: string,
   milestoneTemplateId: string,
   outcome: FinalOutcome | null,
+  recordedAt = now(),
+  snapshot?: Pick<MilestoneOutcomeAttempt, 'outcomeLabel' | 'completedMilestone'>,
 ): void {
   const completion = findOrCreateMilestoneCompletion(dogId, milestoneTemplateId);
-  const previousOutcome = completion.outcome;
-  completion.outcome = outcome;
-  completion.completed = outcome === 'Placement Ready';
-  completion.dateCompleted = completion.completed ? now() : null;
-  refreshDogProgress(dogId);
-  // Inlined rather than calling releaseDog()/reactivateDog() (which each call
-  // notify() themselves) — this keeps the completion change and the
-  // release/reactivate in the caller's single atomic write/sync, and the
-  // same "graduated dogs can't be released" guard still applies.
-  const dog = db.dogs.find((d) => d.id === dogId);
   const template = db.milestoneTemplates.find((m) => m.id === milestoneTemplateId);
-  if (outcome === 'Fail' && template?.isTerminalOutcomeMilestone && dog && !dog.graduated) {
-    const wasReleased = dog.released;
-    dog.released = true;
-    dog.releasedDate ??= now();
-    if (!wasReleased) dog.releasedByTerminalOutcome = true;
-    dog.updatedDate = now();
-  } else if (
-    previousOutcome === 'Fail' &&
-    template?.isTerminalOutcomeMilestone &&
-    dog?.releasedByTerminalOutcome &&
-    !dogHasTerminalFailure(dogId, db.dogMilestoneCompletions, db.milestoneTemplates)
-  ) {
-    // The release was a side effect of the prior Fail outcome — moving off
-    // Fail (a correction, a new non-Fail attempt, or an undo) must undo it,
-    // or the dog is left released while the UI shows a different outcome.
-    dog.released = false;
-    dog.releasedDate = null;
-    dog.releasedByTerminalOutcome = false;
-    dog.updatedDate = now();
-  }
+  if (!template) return;
+  applyOutcomeToCompletion(completion, template, outcome, recordedAt, snapshot);
+  refreshDogProgress(dogId);
 }
 
-// Records the trainer's decision on a milestone flagged isFinalOutcomeMilestone
-// (e.g. the Advanced Final Blindfold). 'Placement Ready' completes the
-// milestone like a normal checkbox — it does not itself graduate the dog;
-// that's still the separate, deliberate markDogGraduated action. 'Additional
-// Objectives' leaves it incomplete: the dog keeps training. 'Fail' leaves it
-// incomplete and auto-releases the dog. Passing null clears a mis-click back
-// to no decision. This is the non-repeatable path — it never touches the
-// attempt ledger; see recordMilestoneOutcomeAttempt for repeatable milestones.
+// Single decisions can be corrected or cleared. Dog lifecycle stays unchanged.
 export function setMilestoneOutcome(
   dogId: string,
   milestoneTemplateId: string,
   outcome: FinalOutcome | null,
 ): boolean {
   const template = db.milestoneTemplates.find((m) => m.id === milestoneTemplateId);
-  if (!template || template.repeatable) return false;
+  if (!template || template.repeatable || !db.dogs.some((d) => d.id === dogId)) return false;
   if (outcome !== null && !isMilestoneOutcomeAllowed(template, outcome)) return false;
   applyMilestoneOutcomeState(dogId, milestoneTemplateId, outcome);
   const persisted = notify();
@@ -1596,7 +1520,7 @@ export function setMilestoneOutcome(
 
 // Records a new historical attempt on a repeatable final-outcome milestone
 // (#33) — the only function that ever appends to milestoneOutcomeAttempts.
-// Pushes the event first, then mirrors it into the completion/release state
+// Pushes the event first, then mirrors it into the milestone completion state
 // via the exact same applyMilestoneOutcomeState used by the non-repeatable
 // path, so "what's the dog's current status" reads identically either way.
 export function recordMilestoneOutcomeAttempt(
@@ -1606,12 +1530,15 @@ export function recordMilestoneOutcomeAttempt(
   notes: string | null = null,
 ): boolean {
   const template = db.milestoneTemplates.find((m) => m.id === milestoneTemplateId);
-  if (!template?.repeatable || !isMilestoneOutcomeAllowed(template, outcome)) return false;
+  if (!template?.repeatable || !isMilestoneOutcomeAllowed(template, outcome) ||
+      !db.dogs.some((d) => d.id === dogId)) return false;
   db.milestoneOutcomeAttempts.push({
     id: uid(),
     dogId,
     milestoneTemplateId,
     outcome,
+    outcomeLabel: outcomeLabel(template, outcome),
+    completedMilestone: outcomeOptions(template).find((o) => o.id === outcome)?.completesMilestone ?? false,
     attemptDate: now(),
     migratedFromLegacyCompletion: false,
     notes,
@@ -1626,7 +1553,7 @@ export function recordMilestoneOutcomeAttempt(
 }
 
 // Removes the most recent attempt on a repeatable milestone (a mis-click,
-// wrong outcome selected) and recomputes the completion/release state from
+// wrong outcome selected) and recomputes the milestone completion state from
 // whatever's now latest — or clears it entirely if that was the only
 // attempt. Deliberately calls applyMilestoneOutcomeState directly, never
 // recordMilestoneOutcomeAttempt or setMilestoneOutcome: this must never
@@ -1644,7 +1571,8 @@ export function deleteMostRecentMilestoneAttempt(
 
   db.milestoneOutcomeAttempts = db.milestoneOutcomeAttempts.filter((a) => a.id !== last.id);
   const newLatest = attempts[attempts.length - 2] ?? null;
-  applyMilestoneOutcomeState(dogId, milestoneTemplateId, newLatest?.outcome ?? null);
+  applyMilestoneOutcomeState(dogId, milestoneTemplateId, newLatest?.outcome ?? null,
+    newLatest?.attemptDate ?? now(), newLatest ?? undefined);
   const persisted = notify();
   logEvent(
     'Milestone attempt undone',
@@ -1769,13 +1697,6 @@ export interface SuccessRate {
   released: number;
 }
 
-export interface FinalOutcomeCounts {
-  placementReady: number;
-  additionalObjectives: number;
-  fail: number;
-  total: number;
-}
-
 export interface TrainerHistoryStats {
   totalDogs: number;
   activeDogs: number;
@@ -1785,27 +1706,8 @@ export interface TrainerHistoryStats {
   dogsNeedingAttention: DogActivitySummary[];
   successRateOverall: SuccessRate;
   successRateRefined: SuccessRate;
-  finalOutcomeCounts: FinalOutcomeCounts;
-  // Every historical attempt on a repeatable final-outcome milestone (#33),
-  // not just the latest per dog — a secondary view alongside
-  // finalOutcomeCounts, which stays latest-attempt-only (see that field's
-  // computation). Zero for accounts that have never used repeatable
-  // milestones.
-  attemptHistory: { counts: FinalOutcomeCounts; dogCount: number };
-  graduatedDogsList: Dog[];
-}
-
-// Dogs still in progress (neither graduated nor released) never count toward
-// either side of this ratio — only a decided outcome moves the needle.
-function computeSuccessRate(dogs: Dog[]): SuccessRate {
-  const graduated = dogs.filter((d) => d.graduated).length;
-  const released = dogs.filter((d) => d.released).length;
-  const decided = graduated + released;
-  return {
-    percent: decided > 0 ? Math.round((graduated / decided) * 100) : null,
-    graduated,
-    released,
-  };
+  milestoneStats: MilestoneStats[];
+  dogLists: ReturnType<typeof dogStatistics>['lists'];
 }
 
 export function useTrainerHistoryStats(): TrainerHistoryStats {
@@ -1820,49 +1722,10 @@ export function useTrainerHistoryStats(): TrainerHistoryStats {
     const releasedDogs = dogs.filter((d) => d.released).length;
     const activeDogs = dogs.filter((d) => !d.graduated && !d.released).length;
 
-    const successRateOverall = computeSuccessRate(dogs);
-    const successRateRefined = computeSuccessRate(dogs.filter((d) => !d.excludedFromStats));
-
-    // Aggregate only the single explicitly designated terminal milestone.
-    // Generic prompted milestones remain visible on dog records but cannot
-    // double-count a dog in the final-outcome analytics.
-    const terminalOutcomeMilestoneIds = new Set(
-      milestoneTemplates.filter((m) => m.isTerminalOutcomeMilestone).map((m) => m.id),
-    );
-    const terminalCounts = countTerminalOutcomes(
-      dogMilestoneCompletions,
-      milestoneTemplates,
-    );
-    const finalOutcomeCounts: FinalOutcomeCounts = {
-      placementReady: terminalCounts['Placement Ready'],
-      additionalObjectives: terminalCounts['Additional Objectives'],
-      fail: terminalCounts.Fail,
-      total: terminalCounts['Placement Ready'] + terminalCounts['Additional Objectives'] + terminalCounts.Fail,
-    };
-
-    // Every historical attempt, not just the latest per dog (contrast with
-    // finalOutcomeCounts above) — same milestone filter, different source
-    // array. A dog that failed twice before passing shows up three times
-    // here but only once (Placement Ready) in finalOutcomeCounts.
-    const attemptDogIds = new Set<string>();
-    const attemptCounts = milestoneOutcomeAttempts.reduce<FinalOutcomeCounts>(
-      (acc, a) => {
-        if (!terminalOutcomeMilestoneIds.has(a.milestoneTemplateId)) return acc;
-        attemptDogIds.add(a.dogId);
-        if (a.outcome === 'Placement Ready') acc.placementReady += 1;
-        else if (a.outcome === 'Additional Objectives') acc.additionalObjectives += 1;
-        else if (a.outcome === 'Fail') acc.fail += 1;
-        return acc;
-      },
-      { placementReady: 0, additionalObjectives: 0, fail: 0, total: 0 },
-    );
-    attemptCounts.total =
-      attemptCounts.placementReady + attemptCounts.additionalObjectives + attemptCounts.fail;
-    const attemptHistory = { counts: attemptCounts, dogCount: attemptDogIds.size };
-
-    const graduatedDogsList = dogs
-      .filter((d) => d.graduated)
-      .sort((a, b) => (b.graduatedDate ?? '').localeCompare(a.graduatedDate ?? ''));
+    const dogStats = dogStatistics(dogs);
+    const successRateOverall = dogStats.overall;
+    const successRateRefined = dogStats.refined;
+    const milestoneStats = milestoneStatistics(dogs, milestoneTemplates, dogMilestoneCompletions, milestoneOutcomeAttempts);
 
     const lastWorkedByDog = new Map<string, string>();
     reports.forEach((r) => {
@@ -1895,9 +1758,8 @@ export function useTrainerHistoryStats(): TrainerHistoryStats {
       dogsNeedingAttention,
       successRateOverall,
       successRateRefined,
-      finalOutcomeCounts,
-      attemptHistory,
-      graduatedDogsList,
+      milestoneStats,
+      dogLists: dogStats.lists,
     };
   }, [state, today]);
 }

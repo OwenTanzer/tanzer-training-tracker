@@ -1,3 +1,4 @@
+import { outcomeLabel } from '../lib/outcomeConfig';
 import {
   calendarDateAtLocalNoon,
   isFutureSessionDate,
@@ -63,18 +64,6 @@ import {
   type Phase,
   type TrainingReport,
 } from '../types';
-
-const OUTCOME_STYLES: Record<FinalOutcome, string> = {
-  'Placement Ready': 'text-emerald-600 dark:text-emerald-400',
-  'Additional Objectives': 'text-amber-600 dark:text-amber-400',
-  Fail: 'text-red-500',
-};
-
-const OUTCOME_ICONS: Record<FinalOutcome, string> = {
-  'Placement Ready': '🟢',
-  'Additional Objectives': '🟡',
-  Fail: '🔴',
-};
 
 function EditReportForm({
   report,
@@ -265,40 +254,36 @@ function EditReportForm({
 // because useMilestoneAttempts is a hook and this renders inside a .map().
 function RepeatableMilestoneOutcome({
   dogId,
-  dogName,
   milestone,
   completion,
 }: {
   dogId: string;
-  dogName: string;
   milestone: MilestoneTemplate;
   completion: DogMilestoneCompletion | undefined;
 }) {
   const attempts = useMilestoneAttempts(dogId, milestone.id);
   const [recording, setRecording] = useState(false);
-  const [outcome, setOutcome] = useState<FinalOutcome>(milestone.allowedOutcomes[0] ?? 'Placement Ready');
+  const [outcome, setOutcome] = useState<FinalOutcome>('');
 
   useEffect(() => {
     if (!milestone.allowedOutcomes.includes(outcome)) {
-      setOutcome(milestone.allowedOutcomes[0] ?? 'Placement Ready');
+      setOutcome('');
     }
   }, [milestone.allowedOutcomes, outcome]);
   const [notes, setNotes] = useState('');
+  const [saveError, setSaveError] = useState('');
 
   function handleRecord(e: React.FormEvent) {
     e.preventDefault();
-    if (
-      outcome === 'Fail' &&
-      !confirm(
-        `Mark ${dogName} as Failed on this evaluation? This automatically releases them from training.`,
-      )
-    ) {
+    if (!outcome) return;
+    if (!recordMilestoneOutcomeAttempt(dogId, milestone.id, outcome, notes.trim() || null)) {
+      setSaveError('Could not save this result. Check the current choices and available device storage, then try again.');
       return;
     }
-    recordMilestoneOutcomeAttempt(dogId, milestone.id, outcome, notes.trim() || null);
+    setSaveError('');
     setRecording(false);
     setNotes('');
-    setOutcome(milestone.allowedOutcomes[0] ?? 'Placement Ready');
+    setOutcome('');
   }
 
   function handleUndo() {
@@ -317,8 +302,8 @@ function RepeatableMilestoneOutcome({
         </span>
       </div>
       {completion?.outcome ? (
-        <span className={`text-xs font-medium ${OUTCOME_STYLES[completion.outcome]}`}>
-          {OUTCOME_ICONS[completion.outcome]} Current: {completion.outcome}
+        <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
+          Current: {completion.outcomeLabel ?? outcomeLabel(milestone, completion.outcome)}
         </span>
       ) : (
         <span className="text-xs text-gray-400">No attempts yet</span>
@@ -327,7 +312,7 @@ function RepeatableMilestoneOutcome({
         <ul className="space-y-0.5 text-xs text-gray-500">
           {attempts.map((a) => (
             <li key={a.id}>
-              {OUTCOME_ICONS[a.outcome]} {a.outcome} —{' '}
+              {a.outcomeLabel ?? outcomeLabel(milestone, a.outcome)} —{' '}
               {a.migratedFromLegacyCompletion
                 ? 'date unknown (migrated)'
                 : new Date(a.attemptDate).toLocaleDateString()}
@@ -336,10 +321,14 @@ function RepeatableMilestoneOutcome({
           ))}
         </ul>
       )}
+      {milestone.allowedOutcomes.length === 0 && (
+        <p className="text-xs text-gray-500">Add choices in <Link to="/templates" className="text-sky-500 underline">Manage Training Options</Link> before recording a result.</p>
+      )}
       <div className="flex gap-2">
         <button
           type="button"
-          onClick={() => setRecording(true)}
+          disabled={milestone.allowedOutcomes.length === 0}
+          onClick={() => { setOutcome(''); setSaveError(''); setRecording(true); }}
           className="rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs font-medium hover:bg-gray-50 dark:hover:bg-gray-800"
         >
           + Record Attempt
@@ -360,16 +349,20 @@ function RepeatableMilestoneOutcome({
           className="space-y-1.5 rounded-md border border-sky-300 dark:border-sky-700 p-2"
         >
           <select
+            aria-label={`${milestone.title} outcome`}
+            required
             value={outcome}
             onChange={(e) => setOutcome(e.target.value as FinalOutcome)}
             className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-sm"
           >
+            <option value="">Choose an outcome…</option>
             {milestone.allowedOutcomes.map((o) => (
               <option key={o} value={o}>
-                {o}
+                {outcomeLabel(milestone, o)}
               </option>
             ))}
           </select>
+          {saveError && <p role="alert" className="text-sm text-red-500">{saveError}</p>}
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
@@ -412,7 +405,7 @@ function PreservedMilestoneAttemptHistory({
     <ul className="ml-6 space-y-0.5 text-xs text-gray-500">
       {attempts.map((attempt) => (
         <li key={attempt.id}>
-          {OUTCOME_ICONS[attempt.outcome]} {attempt.outcome} —{' '}
+          {attempt.outcomeLabel ?? outcomeLabel(milestone, attempt.outcome)} —{' '}
           {attempt.migratedFromLegacyCompletion
             ? 'date unknown (migrated)'
             : new Date(attempt.attemptDate).toLocaleDateString()}
@@ -633,15 +626,9 @@ export function DogProfile() {
   function handleMilestoneOutcomeChange(milestoneId: string, value: string) {
     if (!dog) return;
     const outcome = (value || null) as FinalOutcome | null;
-    if (
-      outcome === 'Fail' &&
-      !confirm(
-        `Mark ${dog.name} as Failed on this evaluation? This automatically releases them from training.`,
-      )
-    ) {
-      return;
+    if (!setMilestoneOutcome(dog.id, milestoneId, outcome)) {
+      alert('Could not save this result. Check the current choices and available device storage, then try again.');
     }
-    setMilestoneOutcome(dog.id, milestoneId, outcome);
   }
 
   return (
@@ -698,7 +685,7 @@ export function DogProfile() {
                   title="This dog is omitted from Trainer History's refined success rate"
                   className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400"
                 >
-                  Excluded from stats
+                  Excluded from success rate
                 </span>
               )}
               {dog.passBackSource && (
@@ -873,7 +860,7 @@ export function DogProfile() {
               : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
           }`}
         >
-          {dog.excludedFromStats ? '📊 Excluded from Stats' : '📊 Exclude from Stats'}
+          {dog.excludedFromStats ? '📊 Excluded from Success Rate' : '📊 Exclude from Success Rate'}
         </button>
         <button
           onClick={() => setTransferring(true)}
@@ -1023,6 +1010,7 @@ export function DogProfile() {
         <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
           {dog.currentPhase} Milestones
         </h2>
+        <p className="text-xs text-gray-500">Record the result of each evaluation here. Release and graduation are separate actions above.</p>
         <ul className="space-y-1">
           {milestones.map((m) => {
             const completion = milestoneCompletions.find((c) => c.milestoneTemplateId === m.id);
@@ -1031,7 +1019,6 @@ export function DogProfile() {
                 <RepeatableMilestoneOutcome
                   key={m.id}
                   dogId={dog.id}
-                  dogName={dog.name}
                   milestone={m}
                   completion={completion}
                 />
@@ -1053,30 +1040,34 @@ export function DogProfile() {
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 text-sm">
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
                     <select
+                      aria-label={`${m.title} outcome`}
                       value={completion?.outcome ?? ''}
                       onChange={(e) => handleMilestoneOutcomeChange(m.id, e.target.value)}
-                      className="rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
+                      className="max-w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
                     >
                       <option value="">No decision yet</option>
                       {completion?.outcome && !m.allowedOutcomes.includes(completion.outcome) && (
                         <option value={completion.outcome} disabled>
-                          {completion.outcome} (historical)
+                          {completion.outcomeLabel ?? outcomeLabel(m, completion.outcome)} (historical)
                         </option>
                       )}
                       {m.allowedOutcomes.map((outcome) => (
                         <option key={outcome} value={outcome}>
-                          {outcome}
+                          {outcomeLabel(m, outcome)}
                         </option>
                       ))}
                     </select>
                     {completion?.outcome && (
-                      <span className={`text-xs font-medium ${OUTCOME_STYLES[completion.outcome]}`}>
-                        {OUTCOME_ICONS[completion.outcome]} {completion.outcome}
+                      <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
+                        {completion.outcomeLabel ?? outcomeLabel(m, completion.outcome)}
                       </span>
                     )}
                   </div>
+                  {m.allowedOutcomes.length === 0 && (
+                    <p className="text-xs text-gray-500">Add choices in <Link to="/templates" className="text-sky-500 underline">Manage Training Options</Link> before recording a result.</p>
+                  )}
                   <PreservedMilestoneAttemptHistory
                     dogId={dog.id}
                     milestone={m}
@@ -1108,8 +1099,8 @@ export function DogProfile() {
                   )}
                 </label>
                 {completion?.outcome && (
-                  <span className={`ml-6 text-xs font-medium ${OUTCOME_STYLES[completion.outcome]}`}>
-                    Preserved outcome: {OUTCOME_ICONS[completion.outcome]} {completion.outcome}
+                  <span className="ml-6 text-xs font-medium text-gray-600 dark:text-gray-300">
+                    Preserved outcome: {completion.outcomeLabel ?? outcomeLabel(m, completion.outcome)}
                   </span>
                 )}
                 <PreservedMilestoneAttemptHistory

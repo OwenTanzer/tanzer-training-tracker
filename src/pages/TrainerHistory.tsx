@@ -1,3 +1,4 @@
+import { MilestoneOutcomeChart } from '../components/MilestoneOutcomeChart';
 import { calendarDateAtLocalNoon } from '../../shared/sessionDate';
 import { formatTrainerSince } from '../../shared/trainerSince';
 import { useState, type ReactNode } from 'react';
@@ -20,7 +21,6 @@ import {
   usePinnedFolderId,
   useDailySessionCounts,
   useTrainerHistoryStats,
-  type FinalOutcomeCounts,
   type SuccessRate,
 } from '../data/store';
 import { useSession } from '../lib/auth';
@@ -81,51 +81,13 @@ function SuccessRateCard({ rate }: { rate: SuccessRate }) {
   );
 }
 
-// Part-to-whole across 3 categories reads more precisely as a segmented bar
-// than a pie — same status colors (emerald/amber/red) already used
-// everywhere else in the app (ProgressBar, released markers, flags).
-function FinalOutcomeBar({ counts }: { counts: FinalOutcomeCounts }) {
-  if (counts.total === 0) {
-    return (
-      <p className="text-sm text-gray-400">No final outcome decisions recorded yet.</p>
-    );
-  }
-  const segments: { label: string; count: number; color: string }[] = [
-    { label: 'Placement Ready', count: counts.placementReady, color: 'bg-emerald-500' },
-    { label: 'Additional Objectives', count: counts.additionalObjectives, color: 'bg-amber-400' },
-    { label: 'Fail', count: counts.fail, color: 'bg-red-500' },
-  ];
-  return (
-    <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
-      <div className="flex h-4 w-full gap-[2px] overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
-        {segments
-          .filter((s) => s.count > 0)
-          .map((s) => (
-            <div
-              key={s.label}
-              className={`h-full ${s.color}`}
-              style={{ width: `${(s.count / counts.total) * 100}%` }}
-              title={`${s.label}: ${s.count} (${Math.round((s.count / counts.total) * 100)}%)`}
-            />
-          ))}
-      </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
-        {segments.map((s) => (
-          <span key={s.label} className="flex items-center gap-1.5">
-            <span className={`h-2 w-2 rounded-full ${s.color}`} />
-            {s.label}: {s.count} ({Math.round((s.count / counts.total) * 100)}%)
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function TrainerHistory() {
   const stats = useTrainerHistoryStats();
   const session = useSession();
   const [refinedRate, setRefinedRate] = useState(true);
-  const [showGraduatedList, setShowGraduatedList] = useState(false);
+  const [dogList, setDogList] = useState<keyof typeof stats.dogLists | null>(null);
+  const listLabels = { all: 'All dogs', active: 'Active dogs', graduated: 'Graduated dogs', released: 'Released dogs' };
+  const toggleList = (list: keyof typeof stats.dogLists) => setDogList((current) => current === list ? null : list);
   const pinnedFolderId = usePinnedFolderId();
   const pinnedFolder = useFolder(pinnedFolderId);
   const pinnedDogs = useDogsInFolder(pinnedFolderId ?? '');
@@ -292,37 +254,35 @@ export function TrainerHistory() {
             icon={<DogIcon className="h-5 w-5" />}
             label="Total dogs handled"
             value={stats.totalDogs}
+            onClick={() => toggleList('all')}
           />
-          <StatTile icon={<PawPrint className="h-5 w-5" />} label="Active dogs" value={stats.activeDogs} />
+          <StatTile icon={<PawPrint className="h-5 w-5" />} label="Active dogs" value={stats.activeDogs} onClick={() => toggleList('active')} />
           <StatTile
             icon={<GraduationCap className="h-5 w-5" />}
             label="Graduated (tap for list)"
             value={stats.graduatedDogs}
-            onClick={() => setShowGraduatedList((v) => !v)}
+            onClick={() => toggleList('graduated')}
           />
-          <StatTile icon={<LogOut className="h-5 w-5" />} label="Released" value={stats.releasedDogs} />
+          <StatTile icon={<LogOut className="h-5 w-5" />} label="Released" value={stats.releasedDogs} onClick={() => toggleList('released')} />
         </div>
-        {showGraduatedList && (
-          <ul className="space-y-1">
-            {stats.graduatedDogsList.length === 0 && (
-              <p className="text-sm text-gray-400">No graduated dogs yet.</p>
-            )}
-            {stats.graduatedDogsList.map((dog) => (
-              <li key={dog.id}>
-                <Link
-                  to={`/dog/${dog.id}`}
-                  className="flex items-center justify-between rounded-xl border border-emerald-200 dark:border-emerald-900 p-3 text-sm hover:border-emerald-400"
-                >
-                  <span className="font-medium text-gray-900 dark:text-gray-100">{dog.name}</span>
-                  <span className="text-xs text-emerald-600 dark:text-emerald-400">
-                    {dog.graduatedDate
-                      ? `Graduated ${calendarDateAtLocalNoon(dog.graduatedDate).toLocaleDateString()}`
-                      : 'Graduated'}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+        <p className="text-xs text-gray-500">Tap a category to see its dogs.</p>
+        {dogList && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium">{listLabels[dogList]}</h3>
+            {stats.dogLists[dogList].length === 0 && <p className="text-sm text-gray-400">No dogs in this category yet.</p>}
+            <ul className="space-y-1">
+              {stats.dogLists[dogList].map((dog) => (
+                <li key={dog.id}>
+                  <Link to={`/dog/${dog.id}`} className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 p-3 text-sm hover:border-sky-400 dark:border-gray-700">
+                    <span className="font-medium">{dog.name}</span>
+                    <span className="text-xs text-gray-500">
+                      {dog.graduated ? (dog.graduatedDate ? `Graduated ${calendarDateAtLocalNoon(dog.graduatedDate).toLocaleDateString()}` : 'Graduated') : dog.released ? 'Released' : dog.currentPhase}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </section>
 
@@ -335,7 +295,7 @@ export function TrainerHistory() {
             <button
               type="button"
               onClick={() => setRefinedRate(true)}
-              title="Omits dogs marked Excluded from Stats (pass-backs, health releases, etc.)"
+              title="Omits dogs marked Excluded from Success Rate (pass-backs, health releases, etc.)"
               className={
                 refinedRate
                   ? 'rounded-md bg-sky-500 px-2 py-1 font-medium text-white'
@@ -360,26 +320,15 @@ export function TrainerHistory() {
         <SuccessRateCard rate={activeSuccessRate} />
         <p className="text-xs text-gray-400">
           Graduated ÷ (graduated + released). Dogs still in progress aren't counted either way.
-          {refinedRate && ' Refined omits dogs marked "Excluded from Stats."'}
+          {refinedRate && ' Refined omits dogs marked "Excluded from Success Rate."'}
         </p>
       </section>
 
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
-          Final Evaluation Outcomes
-        </h2>
-        <FinalOutcomeBar counts={stats.finalOutcomeCounts} />
-        <p className="text-xs text-gray-400">
-          From the milestone flagged as the final outcome (e.g. Advanced Final Blindfold) in
-          Manage Training Options — each dog's most recent decision only.
-        </p>
-        {stats.attemptHistory.counts.total > 0 && (
-          <p className="text-xs text-gray-400">
-            {stats.attemptHistory.counts.total} total evaluation attempts across{' '}
-            {stats.attemptHistory.dogCount} {stats.attemptHistory.dogCount === 1 ? 'dog' : 'dogs'} — includes
-            retakes on repeatable milestones.
-          </p>
-        )}
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">Milestone Outcomes</h2>
+        <p className="text-xs text-gray-500">Includes all your dogs, including dogs excluded from the refined success rate. Each evaluation is counted separately.</p>
+        {stats.milestoneStats.length === 0 && <p className="text-sm text-gray-400">Enable outcome recording in <Link to="/templates" className="text-sky-500 hover:underline">Manage Training Options</Link> to see evaluation results here.</p>}
+        {stats.milestoneStats.map((milestone) => <MilestoneOutcomeChart key={milestone.id} stats={milestone} />)}
       </section>
     </div>
   );
