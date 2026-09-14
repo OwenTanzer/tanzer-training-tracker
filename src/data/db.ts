@@ -15,7 +15,7 @@ import type {
 } from '../types';
 import { buildDefaultChecklist } from './defaultChecklist';
 import { buildDefaultMilestones } from './defaultMilestones';
-import { backfillAllowedOutcomes, dogHasTerminalFailure } from '../lib/outcomeConfig';
+import { backfillAllowedOutcomes, normalizeMilestoneTemplate, outcomeLabel } from '../lib/outcomeConfig';
 
 export interface Database {
   folders: Folder[];
@@ -164,22 +164,10 @@ function backfillDogs(dogs: Dog[]): Dog[] {
   );
 }
 
-// Templates predating configurable outcomes or the repeatable flag (#33)
-// won't have those stored. An absent/invalid list preserves the legacy
-// behavior by allowing every outcome.
+// Backfill legacy choices without replacing explicit custom/empty lists.
+// Terminal flags and dog lifecycle are never inferred from a generic prompt.
 function backfillMilestoneTemplates(templates: MilestoneTemplate[]): MilestoneTemplate[] {
-  return templates.map((template, index) => ({
-    ...template,
-    isFinalOutcomeMilestone: template.isFinalOutcomeMilestone ?? false,
-    isTerminalOutcomeMilestone:
-      (template.isTerminalOutcomeMilestone ?? template.isFinalOutcomeMilestone ?? false) &&
-      !templates.slice(0, index).some(
-        (earlier) =>
-          earlier.isTerminalOutcomeMilestone ?? earlier.isFinalOutcomeMilestone ?? false,
-      ),
-    allowedOutcomes: backfillAllowedOutcomes(template.allowedOutcomes),
-    repeatable: template.repeatable ?? false,
-  }));
+  return templates.map(normalizeMilestoneTemplate);
 }
 
 // Completions predating the final-outcome picker won't have this stored.
@@ -244,20 +232,24 @@ export function normalizeDatabase(
     database.dogMilestoneCompletions = backfillDogMilestoneCompletions(
       database.dogMilestoneCompletions ?? [],
     );
-    database.dogs.forEach((dog) => {
-      if (
-        dog.released &&
-        dogHasTerminalFailure(dog.id, database.dogMilestoneCompletions, database.milestoneTemplates)
-      ) {
-        dog.releasedByTerminalOutcome = true;
-      }
-    });
     // Accounts predating repeatable milestones (#33) won't have this field
     // at all — no migration needed here, since a milestone can only ever
     // have accumulated ledger rows after being flagged repeatable, which
     // this same normalizeDatabase pass also defaults to false for every
     // template that predates the flag.
     database.milestoneOutcomeAttempts = database.milestoneOutcomeAttempts ?? [];
+    // Snapshot old labels before the settings editor can rename them. Do not
+    // invent decisions for unchecked/graduate-completed milestones.
+    for (const record of [...database.dogMilestoneCompletions, ...database.milestoneOutcomeAttempts]) {
+      const template = database.milestoneTemplates.find((m) => m.id === record.milestoneTemplateId);
+      if (record.outcome && record.outcomeLabel == null) {
+        record.outcomeLabel = template ? outcomeLabel(template, record.outcome) : record.outcome;
+      }
+    }
+    for (const attempt of database.milestoneOutcomeAttempts) {
+      // Legacy semantics were fixed. Preserve them for undo even after editing options.
+      attempt.completedMilestone ??= attempt.outcome === 'Placement Ready';
+    }
     // Accounts predating distraction templates (#36) won't have this field at all.
     database.distractionTemplates = database.distractionTemplates ?? [];
     database.dogEvents = database.dogEvents ?? [];

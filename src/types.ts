@@ -64,8 +64,8 @@ export interface Dog {
   graduationStatus: GraduationStatus;
   released: boolean;
   releasedDate: string | null;
-  // Distinguishes a terminal-outcome side effect from a deliberate manual
-  // release so configuration/outcome reconciliation never undoes the latter.
+  // Historical provenance retained for existing records. Outcome recording
+  // no longer releases/reactivates dogs or infers this flag.
   releasedByTerminalOutcome: boolean;
 
   // Distinct from a live graduationStatus of 'Graduated' reached by simply
@@ -209,17 +209,12 @@ export interface MilestoneTemplate {
   phase: Phase;
   title: string;
   sortOrder: number;
-  // Enables a generic outcome prompt for this milestone. Any number of
-  // milestones may collect outcomes; isTerminalOutcomeMilestone separately
-  // selects the single prompt used for aggregate analytics and auto-release.
+  // Legacy field name: enables outcome recording for this milestone.
   isFinalOutcomeMilestone: boolean;
-  // Outcomes offered for future decisions while the prompt is enabled.
-  // Existing completions and attempts may retain a value removed from this
-  // list; configuration changes never rewrite dog history.
+  // IDs offered for future decisions. Retired choices remain in outcomeOptions.
   allowedOutcomes: FinalOutcome[];
-  // The single outcome prompt used for aggregate trainer analytics and
-  // automatic release behavior. Other milestones may still collect generic
-  // outcomes without being treated as the dog's terminal evaluation.
+  outcomeOptions?: MilestoneOutcomeOption[];
+  // Retained for old account compatibility; never controls release behavior.
   isTerminalOutcomeMilestone: boolean;
 
   // Only meaningful alongside isFinalOutcomeMilestone (#33): most milestones
@@ -233,7 +228,14 @@ export interface MilestoneTemplate {
   updatedDate: string;
 }
 
-export type FinalOutcome = 'Placement Ready' | 'Additional Objectives' | 'Fail';
+// Stable option ID; legacy IDs happen to equal their original labels.
+export type FinalOutcome = string;
+
+export interface MilestoneOutcomeOption {
+  id: FinalOutcome;
+  label: string;
+  completesMilestone: boolean;
+}
 
 export const FINAL_OUTCOMES: FinalOutcome[] = [
   'Placement Ready',
@@ -249,14 +251,9 @@ export interface DogMilestoneCompletion {
   dateCompleted: string | null;
   notes: string | null;
   photo: string | null;
-  // Only meaningful for a completion of a milestone flagged
-  // isFinalOutcomeMilestone. 'Fail' auto-releases only when the template is
-  // also the terminal outcome milestone; generic prompts only record their
-  // result. Placement Ready completes the milestone. Always mirrors the
-  // *latest* MilestoneOutcomeAttempt for a repeatable milestone (#33) — this
-  // is deliberately still the single field every other reader (graduation
-  // progress, Trainer History's stats) uses, so "current outcome" behavior
-  // is identical whether or not the milestone happens to be repeatable.
+  // Current decision, mirrored from the latest attempt for repeatable milestones.
+  // Recording never releases or graduates a dog.
+  outcomeLabel?: string | null;
   outcome: FinalOutcome | null;
 }
 
@@ -271,6 +268,8 @@ export interface MilestoneOutcomeAttempt {
   dogId: string;
   milestoneTemplateId: string;
   outcome: FinalOutcome;
+  outcomeLabel?: string;
+  completedMilestone?: boolean;
   attemptDate: string;
   // True only for the one-time row created when a milestone already had a
   // decided-but-unrepeated outcome at the moment it was flipped to

@@ -1,4 +1,4 @@
-import { FINAL_OUTCOMES, type MilestoneTemplate } from '../types';
+import { type MilestoneTemplate } from '../types';
 
 interface MilestoneSeed {
   phase: MilestoneTemplate['phase'];
@@ -40,13 +40,24 @@ export function buildDefaultMilestones(): MilestoneTemplate[] {
     id: crypto.randomUUID(),
     ...seed,
     // Abby's terminal Phase 4 evaluation — the one milestone whose result
-    // decides whether a dog is placement-ready, needs additional
-    // objectives, or is released. See MilestoneTemplate.isTerminalOutcomeMilestone.
-    isFinalOutcomeMilestone: seed.title === 'Advanced Final Blindfold',
+    // records placement readiness or further evaluation needs.
+    // Release is always a separate action. See MilestoneTemplate.isTerminalOutcomeMilestone.
+    isFinalOutcomeMilestone: ['Advanced Final Blindfold', 'Running Guide Evaluation'].includes(seed.title),
     isTerminalOutcomeMilestone: seed.title === 'Advanced Final Blindfold',
     // #33 names these two as the milestones that need to be retakeable —
     // the final evaluation itself, and traffic training at any phase.
-    allowedOutcomes: [...FINAL_OUTCOMES],
+    allowedOutcomes: seed.title === 'Advanced Final Blindfold'
+      ? ['Placement Ready', 'Additional Objectives', 'further-evaluation', 'Fail']
+      : seed.title === 'Running Guide Evaluation' ? ['running-accepted', 'running-declined'] : [],
+    outcomeOptions: seed.title === 'Advanced Final Blindfold' ? [
+      { id: 'Placement Ready', label: 'Placement Ready', completesMilestone: true },
+      { id: 'Additional Objectives', label: 'Additional Objectives', completesMilestone: false },
+      { id: 'further-evaluation', label: 'Further Evaluation', completesMilestone: false },
+      { id: 'Fail', label: 'Fail/Release', completesMilestone: false },
+    ] : seed.title === 'Running Guide Evaluation' ? [
+      { id: 'running-accepted', label: 'Accepted', completesMilestone: true },
+      { id: 'running-declined', label: 'Declined', completesMilestone: false },
+    ] : [],
     repeatable: seed.title === 'Advanced Final Blindfold' || seed.title.startsWith('Traffic Training'),
     createdDate: now,
     updatedDate: now,
