@@ -403,25 +403,19 @@ async function handlePutData(request: Request, env: Env): Promise<Response> {
   const body = await request.json<{ blob?: unknown; expectedUpdatedAt?: string }>();
   if (body.blob === undefined) return errorResponse(request, env, 'blob is required', 400);
 
-  const now = new Date().toISOString();
+  if (typeof body.expectedUpdatedAt !== 'string' || !body.expectedUpdatedAt) {
+    return errorResponse(request, env, 'A server revision is required. Reload the updated app before saving.', 428);
+  }
+  // An opaque revision must change on every write, including two writes in
+  // the same millisecond. Date-only stamps do not provide that guarantee.
+  const now = crypto.randomUUID();
   const blobJson = JSON.stringify(body.blob);
-
-  // Optimistic concurrency: the client must tell us the updatedAt it last
-  // saw. If someone else's write landed first (a second tab/device), zero
-  // rows match and we return 409 rather than silently clobbering their
-  // change — this exact race is what caused the bug this migration fixes.
-  const result = body.expectedUpdatedAt
-    ? await env.DB.prepare(
-        'UPDATE instructor_data SET blob = ?, updated_at = ? WHERE instructor_id = ? AND updated_at = ?',
-      )
-        .bind(blobJson, now, auth, body.expectedUpdatedAt)
-        .run()
-    : await env.DB.prepare('UPDATE instructor_data SET blob = ?, updated_at = ? WHERE instructor_id = ?')
-        .bind(blobJson, now, auth)
-        .run();
+  const result = await env.DB.prepare(
+    'UPDATE instructor_data SET blob = ?, updated_at = ? WHERE instructor_id = ? AND updated_at = ?',
+  ).bind(blobJson, now, auth, body.expectedUpdatedAt).run();
 
   if (result.meta.changes === 0) {
-    return errorResponse(request, env, 'Data changed elsewhere — reload before continuing', 409);
+    return errorResponse(request, env, 'Data changed elsewhere — reconcile pending changes before retrying', 409);
   }
 
   return json(request, env, { updatedAt: now }, 200);
@@ -598,10 +592,11 @@ async function handleTransferDog(request: Request, env: Env): Promise<Response> 
   // this endpoint (the target instructor editing concurrently). Nothing has
   // been committed yet if this fails; the client just retries the whole
   // transfer.
+  const transferRevision = crypto.randomUUID();
   const targetWrite = await env.DB.prepare(
     'UPDATE instructor_data SET blob = ?, updated_at = ? WHERE instructor_id = ? AND updated_at = ?',
   )
-    .bind(JSON.stringify(updatedTargetBlob), now, target.id, targetRow.updated_at)
+    .bind(JSON.stringify(updatedTargetBlob), transferRevision, target.id, targetRow.updated_at)
     .run();
   if (targetWrite.meta.changes === 0) {
     return errorResponse(request, env, 'Target instructor changed elsewhere — try again', 409);
@@ -633,7 +628,7 @@ async function handleTransferDog(request: Request, env: Env): Promise<Response> 
     await env.DB.prepare(
       'UPDATE instructor_data SET blob = ?, updated_at = ? WHERE instructor_id = ? AND updated_at = ?',
     )
-      .bind(targetRow.blob, new Date().toISOString(), target.id, now)
+      .bind(targetRow.blob, crypto.randomUUID(), target.id, transferRevision)
       .run();
     return errorResponse(request, env, 'Transfer could not be recorded — try again', 500);
   }
@@ -652,9 +647,9 @@ async function handleTransferDog(request: Request, env: Env): Promise<Response> 
   const sourceWrite = await env.DB.prepare(
     'UPDATE instructor_data SET blob = ?, updated_at = ? WHERE instructor_id = ? AND updated_at = ?',
   )
-    .bind(JSON.stringify(updatedSourceBlob), now, auth, sourceRow.updated_at)
+    .bind(JSON.stringify(updatedSourceBlob), transferRevision, auth, sourceRow.updated_at)
     .run();
-  const sourceUpdatedAt = sourceWrite.meta.changes > 0 ? now : sourceRow.updated_at;
+  const sourceUpdatedAt = sourceWrite.meta.changes > 0 ? transferRevision : sourceRow.updated_at;
 
   return json(request, env, { dog: newDog, link: newLink, updatedAt: sourceUpdatedAt }, 201);
 }

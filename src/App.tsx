@@ -1,3 +1,4 @@
+import { SyncIndicator, SyncRecovery } from './components/SyncRecovery';
 import { useEffect, useState } from 'react';
 import { Link, Route, Routes } from 'react-router-dom';
 import { LoadingScreen } from './components/LoadingScreen';
@@ -57,7 +58,7 @@ function App() {
     if (!session) return;
     let cancelled = false;
     setHydrateError(null);
-    hydrateFromServer(session.instructorId)
+    hydrateFromServer(session.instructorId, session.token)
       .then(() => {
         // A cancelled effect is dead — it must not read, write, or query
         // store state at all, not just skip its own setState calls.
@@ -197,6 +198,8 @@ function App() {
     );
   }
 
+  if (syncStatus === 'conflict') return <SyncRecovery />;
+
   if (!landingDone) {
     return (
       <Landing
@@ -215,17 +218,7 @@ function App() {
           ⚙️
         </Link>
         <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-          {syncStatus === 'error' && (
-            <span
-              title="Some changes may not be saved to the server yet"
-              className="shrink-0 text-xs text-amber-500"
-            >
-              ⚠️ Not synced
-            </span>
-          )}
-          {syncStatus === 'syncing' && (
-            <span className="shrink-0 text-xs text-gray-400">Syncing…</span>
-          )}
+          <SyncIndicator />
           <Link
             to="/"
             title="Home"

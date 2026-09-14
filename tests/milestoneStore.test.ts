@@ -10,7 +10,7 @@ let uploadedBlob: import('../src/data/db.ts').Database | undefined;
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
   getItem: (key: string) => storage.get(key) ?? null,
   setItem: (key: string, value: string) => {
-    if (failCache && key.includes('server-cache')) throw new Error('QuotaExceededError');
+    if (failCache && (key.includes('server-cache') || key.includes('outbox'))) throw new Error('QuotaExceededError');
     storage.set(key, value);
   },
   removeItem: (key: string) => storage.delete(key),
@@ -27,11 +27,12 @@ before(async () => {
   globalThis.fetch = async (_url, options) => {
     if (options?.method === 'PUT') {
       uploadedBlob = JSON.parse(options.body as string).blob;
+      remoteBlob = uploadedBlob;
       return new Response(JSON.stringify({ updatedAt: 'test-revision' }), { status: 200 });
     }
     return new Response(JSON.stringify({ blob: remoteBlob, updatedAt: 'test-revision', sharedReports: [] }), { status: 200 });
   };
-  server = await createServer({ configFile: false, server: { middlewareMode: true },
+  server = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false },
     define: { 'import.meta.env.VITE_API_BASE_URL': JSON.stringify('https://test.invalid') } });
   store = await server.ssrLoadModule('/src/data/store.ts') as typeof store;
   database = await server.ssrLoadModule('/src/data/db.ts') as typeof database;
@@ -40,6 +41,7 @@ after(async () => { await tick(); await server?.close(); globalThis.fetch = orig
 
 async function setup() {
   store.resetLocalStore();
+  storage.clear();
   remoteBlob = database.emptyDatabase();
   await store.hydrateFromServer('test');
   const dog = store.createDog('Test Dog', 'folder');
