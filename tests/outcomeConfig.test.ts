@@ -64,6 +64,29 @@ test('per-milestone denominator counts current dogs once, includes excluded dogs
 });
 test('retired outcomes remain in charts; unknown/no decisions never become Placement Ready', () => {
   const stats = milestoneStatistics([{ id: 'a' }, { id: 'b' }], [milestone({ allowedOutcomes: [] })], [completion('a', 'no'), completion('b', null)], []);
-  assert.deepEqual(stats[0].outcomes, [{ id: 'no', label: 'Declined (retired)', count: 1 }]);
+  assert.deepEqual(stats[0].outcomes, [{ id: JSON.stringify(['no', 'Declined']), label: 'Declined (retired)', count: 1 }]);
   assert.equal(stats[0].noOutcome, 1);
+});
+
+
+test('renamed outcomes never relabel old results and mixed label versions count separately', () => {
+  const before = milestone();
+  const original = completion('old', null);
+  applyOutcomeToCompletion(original, before, 'yes', '2026-09-01');
+  const after = milestone({ outcomeOptions: [{ id: 'yes', label: 'Pending again', completesMilestone: false }], allowedOutcomes: ['yes'] });
+  const recent = completion('new', null);
+  applyOutcomeToCompletion(recent, after, 'yes', '2026-09-02');
+  const stats = milestoneStatistics([{ id: 'old' }, { id: 'new' }, { id: 'unrecorded' }], [after], [original, recent], [])[0];
+  assert.deepEqual(stats.outcomes.map(({ label, count }) => ({ label, count })), [
+    { label: 'Pending again', count: 1 },
+    { label: 'Accepted (recorded label)', count: 1 },
+  ]);
+  assert.equal(stats.evaluated, 2);
+  assert.equal(stats.noOutcome, 1);
+  assert.equal(new Set(stats.outcomes.map((o) => o.id)).size, 2);
+  const retired = milestoneStatistics([{ id: 'old' }, { id: 'new' }], [{ ...after, allowedOutcomes: [] }], [original, recent], [])[0];
+  assert.deepEqual(retired.outcomes.map(({ label, count }) => ({ label, count })), [
+    { label: 'Accepted (retired)', count: 1 },
+    { label: 'Pending again (retired)', count: 1 },
+  ]);
 });

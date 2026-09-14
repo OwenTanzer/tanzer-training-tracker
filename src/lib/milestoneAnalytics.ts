@@ -26,20 +26,28 @@ export function milestoneStatistics(
       if (!template.isFinalOutcomeMilestone && !records.some((record) => record.outcome)) return [];
       const current = new Map(records.map((record) => [record.dogId, record]));
       const options = outcomeOptions(template);
-      const counts = new Map(template.allowedOutcomes.map((id) => [id, {
-        id, label: options.find((o) => o.id === id)?.label ?? id, count: 0,
-      }]));
+      // A stable option ID may have several recorded labels after edits.
+      // Keep those versions separate instead of relabeling past evaluations.
+      const bucketId = (id: string, label: string) => JSON.stringify([id, label]);
+      const counts = new Map(template.allowedOutcomes.map((id) => {
+        const label = options.find((o) => o.id === id)?.label ?? id;
+        const key = bucketId(id, label);
+        return [key, { id: key, label, count: 0 }];
+      }));
       let evaluated = 0;
       for (const record of current.values()) {
         if (!record.outcome) continue;
-        const entry = counts.get(record.outcome) ?? {
-          id: record.outcome,
-          label: `${options.find((o) => o.id === record.outcome)?.label ?? record.outcomeLabel ?? record.outcome} (retired)`,
-          count: 0,
+        const currentLabel = options.find((o) => o.id === record.outcome)?.label ?? record.outcome;
+        const recordedLabel = record.outcomeLabel ?? currentLabel;
+        const key = bucketId(record.outcome, recordedLabel);
+        const retired = !template.allowedOutcomes.includes(record.outcome);
+        const suffix = retired ? ' (retired)' : recordedLabel !== currentLabel ? ' (recorded label)' : '';
+        const entry = counts.get(key) ?? {
+          id: key, label: recordedLabel + suffix, count: 0,
         };
         entry.count += 1;
         evaluated += 1;
-        counts.set(record.outcome, entry);
+        counts.set(key, entry);
       }
       return [{
         id: template.id, title: template.title, phase: template.phase,

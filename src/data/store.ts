@@ -1523,17 +1523,32 @@ export function setMilestoneOutcome(
 // Pushes the event first, then mirrors it into the milestone completion state
 // via the exact same applyMilestoneOutcomeState used by the non-repeatable
 // path, so "what's the dog's current status" reads identically either way.
+export type MilestoneAttemptResult =
+  | { applied: false; reason: 'invalid' | 'conflict' }
+  | { applied: true; cached: boolean; attemptId: string };
+
 export function recordMilestoneOutcomeAttempt(
   dogId: string,
   milestoneTemplateId: string,
   outcome: FinalOutcome,
   notes: string | null = null,
-): boolean {
+  attemptId: string = uid(),
+): MilestoneAttemptResult {
+  // The recording form supplies one ID per attempt, so a repeated submission
+  // retries persistence rather than appending a second historical event.
+  const existing = db.milestoneOutcomeAttempts.find((attempt) => attempt.id === attemptId);
+  if (existing) {
+    if (existing.dogId !== dogId || existing.milestoneTemplateId !== milestoneTemplateId ||
+        existing.outcome !== outcome || existing.notes !== notes) {
+      return { applied: false, reason: 'conflict' };
+    }
+    return { applied: true, cached: notify(), attemptId };
+  }
   const template = db.milestoneTemplates.find((m) => m.id === milestoneTemplateId);
   if (!template?.repeatable || !isMilestoneOutcomeAllowed(template, outcome) ||
-      !db.dogs.some((d) => d.id === dogId)) return false;
-  db.milestoneOutcomeAttempts.push({
-    id: uid(),
+      !db.dogs.some((d) => d.id === dogId)) return { applied: false, reason: 'invalid' };
+  const attempt: MilestoneOutcomeAttempt = {
+    id: attemptId,
     dogId,
     milestoneTemplateId,
     outcome,
@@ -1542,14 +1557,17 @@ export function recordMilestoneOutcomeAttempt(
     attemptDate: now(),
     migratedFromLegacyCompletion: false,
     notes,
-  });
-  applyMilestoneOutcomeState(dogId, milestoneTemplateId, outcome);
-  const persisted = notify();
+  };
+  db.milestoneOutcomeAttempts.push(attempt);
+  applyMilestoneOutcomeState(dogId, milestoneTemplateId, outcome, attempt.attemptDate, attempt);
+  const cached = notify();
   logEvent(
     'Milestone attempt recorded',
     `dog ${dogId}, milestone ${milestoneTemplateId} -> ${outcome}`,
   );
-  return persisted;
+  // A failed local cache write is not a rejected mutation: the result is
+  // already in history and its server synchronization may succeed.
+  return { applied: true, cached, attemptId };
 }
 
 // Removes the most recent attempt on a repeatable milestone (a mis-click,

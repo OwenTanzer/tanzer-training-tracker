@@ -5,9 +5,14 @@ import { createServer } from 'vite';
 // Load the real store through Vite so its browser imports and env handling are
 // identical to the app. Only storage and the account API boundary are mocked.
 const storage = new Map<string, string>();
+let failCache = false;
+let uploadedBlob: import('../src/data/db.ts').Database | undefined;
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
   getItem: (key: string) => storage.get(key) ?? null,
-  setItem: (key: string, value: string) => storage.set(key, value),
+  setItem: (key: string, value: string) => {
+    if (failCache && key.includes('server-cache')) throw new Error('QuotaExceededError');
+    storage.set(key, value);
+  },
   removeItem: (key: string) => storage.delete(key),
 } });
 let server: Awaited<ReturnType<typeof createServer>>;
@@ -19,9 +24,13 @@ const cache = () => JSON.parse(storage.get('abbys-dog-chej:server-cache:test')!)
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 before(async () => {
-  globalThis.fetch = async (_url, options) => new Response(JSON.stringify(options?.method === 'PUT'
-    ? { updatedAt: 'test-revision' }
-    : { blob: remoteBlob, updatedAt: 'test-revision', sharedReports: [] }), { status: 200 });
+  globalThis.fetch = async (_url, options) => {
+    if (options?.method === 'PUT') {
+      uploadedBlob = JSON.parse(options.body as string).blob;
+      return new Response(JSON.stringify({ updatedAt: 'test-revision' }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ blob: remoteBlob, updatedAt: 'test-revision', sharedReports: [] }), { status: 200 });
+  };
   server = await createServer({ configFile: false, server: { middlewareMode: true },
     define: { 'import.meta.env.VITE_API_BASE_URL': JSON.stringify('https://test.invalid') } });
   store = await server.ssrLoadModule('/src/data/store.ts') as typeof store;
@@ -54,10 +63,10 @@ test('actual single and repeatable recording never releases, graduates, or react
     assert.equal(dog.graduated, false);
   }
   store.toggleMilestoneRepeatable(milestone.id);
-  assert.equal(store.recordMilestoneOutcomeAttempt(dog.id, milestone.id, 'declined'), true);
+  assert.equal(store.recordMilestoneOutcomeAttempt(dog.id, milestone.id, 'declined').applied, true);
   store.releaseDog(dog.id);
   const releaseDate = dog.releasedDate;
-  assert.equal(store.recordMilestoneOutcomeAttempt(dog.id, milestone.id, 'accepted'), true);
+  assert.equal(store.recordMilestoneOutcomeAttempt(dog.id, milestone.id, 'accepted').applied, true);
   store.deleteMostRecentMilestoneAttempt(dog.id, milestone.id);
   store.toggleMilestoneFinalOutcomeFlag(milestone.id);
   assert.equal(dog.released, true);
@@ -78,7 +87,7 @@ test('rename/remove/reload and undo retain original attempt labels, semantics, n
   remoteBlob = cache();
   store.resetLocalStore();
   await store.hydrateFromServer('test');
-  assert.equal(store.recordMilestoneOutcomeAttempt(dog.id, milestone.id, 'accepted'), false);
+  assert.equal(store.recordMilestoneOutcomeAttempt(dog.id, milestone.id, 'accepted').applied, false);
   store.deleteMostRecentMilestoneAttempt(dog.id, milestone.id);
   const state = cache();
   const result = state.dogMilestoneCompletions.find((c: { dogId: string }) => c.dogId === dog.id);
@@ -140,4 +149,56 @@ test('rendered settings and charts show custom labels and exact counts', async (
   assert.match(html, /Declined: 1 \(50%\)/);
   assert.match(html, /2 evaluated · 3 without a recorded outcome/);
   assert.doesNotMatch(html, /Placement Ready/);
+});
+
+
+test('quota failure reports an applied attempt and retries the same event without duplicating it', async () => {
+  const { dog, milestone } = await setup();
+  store.toggleMilestoneRepeatable(milestone.id);
+  await tick();
+  failCache = true;
+  try {
+    const first = store.recordMilestoneOutcomeAttempt(dog.id, milestone.id, 'accepted', 'one evaluation', 'event-1');
+    assert.deepEqual(first, { applied: true, cached: false, attemptId: 'event-1' });
+    await tick();
+    assert.equal(uploadedBlob!.milestoneOutcomeAttempts.length, 1);
+    const original = structuredClone(uploadedBlob!.milestoneOutcomeAttempts[0]);
+
+    const retry = store.recordMilestoneOutcomeAttempt(dog.id, milestone.id, 'accepted', 'one evaluation', 'event-1');
+    assert.deepEqual(retry, first);
+    await tick();
+    assert.deepEqual(uploadedBlob!.milestoneOutcomeAttempts, [original]);
+    assert.deepEqual(store.recordMilestoneOutcomeAttempt(dog.id, milestone.id, 'declined', 'different data', 'event-1'),
+      { applied: false, reason: 'conflict' });
+
+    failCache = false;
+    const cacheRetry = store.recordMilestoneOutcomeAttempt(dog.id, milestone.id, 'accepted', 'one evaluation', 'event-1');
+    assert.deepEqual(cacheRetry, { applied: true, cached: true, attemptId: 'event-1' });
+    assert.equal(cache().milestoneOutcomeAttempts.length, 1);
+    // A genuinely new evaluation, even with identical content, is still allowed.
+    assert.equal(store.recordMilestoneOutcomeAttempt(dog.id, milestone.id, 'accepted', 'one evaluation', 'event-2').applied, true);
+    await tick();
+    assert.equal(uploadedBlob!.milestoneOutcomeAttempts.length, 2);
+  } finally {
+    failCache = false;
+    await tick();
+  }
+});
+
+test('single-decision selector keeps the recorded label after rename and permits an explicit new decision', async () => {
+  const React = await import('react');
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { MilestoneOutcomeSelect } = await server.ssrLoadModule('/src/components/MilestoneOutcomeSelect.tsx');
+  const { dog, milestone } = await setup();
+  store.setMilestoneOutcome(dog.id, milestone.id, 'accepted');
+  store.saveMilestoneOutcomeOptions(milestone.id, [{ id: 'accepted', label: 'Pending again', completesMilestone: false }]);
+  const completion = cache().dogMilestoneCompletions[0];
+  const html = renderToStaticMarkup(React.createElement(MilestoneOutcomeSelect, { milestone, completion, onChange: () => {} }));
+  assert.match(html, /<option[^>]*value="recorded"[^>]*selected=""[^>]*>Accepted \(recorded\)/);
+  assert.match(html, /<option value="option:accepted">Pending again<\/option>/);
+  assert.doesNotMatch(html, /value="option:accepted"[^>]*selected/);
+  store.setMilestoneOutcome(dog.id, milestone.id, 'accepted');
+  assert.equal(cache().dogMilestoneCompletions[0].outcomeLabel, 'Pending again');
+  assert.equal(cache().dogMilestoneCompletions[0].completed, false);
+  await tick();
 });

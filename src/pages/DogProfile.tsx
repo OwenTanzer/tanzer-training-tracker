@@ -1,3 +1,4 @@
+import { MilestoneOutcomeSelect } from '../components/MilestoneOutcomeSelect';
 import { outcomeLabel } from '../lib/outcomeConfig';
 import {
   calendarDateAtLocalNoon,
@@ -6,7 +7,7 @@ import {
   localSessionDate,
   storedLocalCalendarDate,
 } from '../../shared/sessionDate';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { DistractionAnalytics } from '../components/DistractionAnalytics';
 import { MoveDialog } from '../components/MoveDialog';
@@ -272,15 +273,20 @@ function RepeatableMilestoneOutcome({
   }, [milestone.allowedOutcomes, outcome]);
   const [notes, setNotes] = useState('');
   const [saveError, setSaveError] = useState('');
+  const [cacheWarning, setCacheWarning] = useState(false);
+  const attemptId = useRef<string | null>(null);
 
   function handleRecord(e: React.FormEvent) {
     e.preventDefault();
     if (!outcome) return;
-    if (!recordMilestoneOutcomeAttempt(dogId, milestone.id, outcome, notes.trim() || null)) {
-      setSaveError('Could not save this result. Check the current choices and available device storage, then try again.');
+    attemptId.current ??= crypto.randomUUID();
+    const result = recordMilestoneOutcomeAttempt(dogId, milestone.id, outcome, notes.trim() || null, attemptId.current);
+    if (!result.applied) {
+      setSaveError('This result was not recorded. Check the current outcome choices and start a new attempt.');
       return;
     }
     setSaveError('');
+    setCacheWarning(!result.cached);
     setRecording(false);
     setNotes('');
     setOutcome('');
@@ -321,6 +327,9 @@ function RepeatableMilestoneOutcome({
           ))}
         </ul>
       )}
+      {cacheWarning && (
+        <p role="status" className="text-sm text-amber-600">Attempt added to history, but this device could not save a local copy. Check sync status before leaving; do not record it again.</p>
+      )}
       {milestone.allowedOutcomes.length === 0 && (
         <p className="text-xs text-gray-500">Add choices in <Link to="/templates" className="text-sky-500 underline">Manage Training Options</Link> before recording a result.</p>
       )}
@@ -328,7 +337,7 @@ function RepeatableMilestoneOutcome({
         <button
           type="button"
           disabled={milestone.allowedOutcomes.length === 0}
-          onClick={() => { setOutcome(''); setSaveError(''); setRecording(true); }}
+          onClick={() => { attemptId.current = crypto.randomUUID(); setOutcome(''); setNotes(''); setSaveError(''); setRecording(true); }}
           className="rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs font-medium hover:bg-gray-50 dark:hover:bg-gray-800"
         >
           + Record Attempt
@@ -623,9 +632,8 @@ export function DogProfile() {
     deleteReport(id);
   }
 
-  function handleMilestoneOutcomeChange(milestoneId: string, value: string) {
+  function handleMilestoneOutcomeChange(milestoneId: string, outcome: FinalOutcome | null) {
     if (!dog) return;
-    const outcome = (value || null) as FinalOutcome | null;
     if (!setMilestoneOutcome(dog.id, milestoneId, outcome)) {
       alert('Could not save this result. Check the current choices and available device storage, then try again.');
     }
@@ -1041,24 +1049,11 @@ export function DogProfile() {
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <select
-                      aria-label={`${m.title} outcome`}
-                      value={completion?.outcome ?? ''}
-                      onChange={(e) => handleMilestoneOutcomeChange(m.id, e.target.value)}
-                      className="max-w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
-                    >
-                      <option value="">No decision yet</option>
-                      {completion?.outcome && !m.allowedOutcomes.includes(completion.outcome) && (
-                        <option value={completion.outcome} disabled>
-                          {completion.outcomeLabel ?? outcomeLabel(m, completion.outcome)} (historical)
-                        </option>
-                      )}
-                      {m.allowedOutcomes.map((outcome) => (
-                        <option key={outcome} value={outcome}>
-                          {outcomeLabel(m, outcome)}
-                        </option>
-                      ))}
-                    </select>
+                    <MilestoneOutcomeSelect
+                      milestone={m}
+                      completion={completion}
+                      onChange={(outcome) => handleMilestoneOutcomeChange(m.id, outcome)}
+                    />
                     {completion?.outcome && (
                       <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
                         {completion.outcomeLabel ?? outcomeLabel(m, completion.outcome)}
