@@ -3,13 +3,14 @@ import { after, before, test } from 'node:test';
 import { createServer } from 'vite';
 import type { Database } from '../src/data/db.ts';
 const storage = new Map<string, string>();
-let failStorage = false, offline = false, lostAck = false, unauthorized = false;
+let failStorage = false, failLegacyRemoval = false, failLegacyRead = false, failLegacyClaim = false;
+let offline = false, offlineWrite = false, lostAck = false, unauthorized = false;
 let remote: Database, revision = 0;
 const originalFetch = globalThis.fetch;
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
-  getItem: (k: string) => storage.get(k) ?? null,
-  setItem: (k: string, v: string) => { if (failStorage && (k.includes('outbox') || k.includes('server-cache'))) throw new Error('Quota'); storage.set(k, v); },
-  removeItem: (k: string) => storage.delete(k),
+  getItem: (k: string) => { if (failLegacyRead && k === 'abbys-dog-chej:db:v1') throw new Error('Read denied'); return storage.get(k) ?? null; },
+  setItem: (k: string, v: string) => { if (failLegacyClaim && k === 'abbys-dog-chej:db:v1:claimed') throw new Error('Claim denied'); if (failStorage && (k.includes('outbox') || k.includes('server-cache'))) throw new Error('Quota'); storage.set(k, v); },
+  removeItem: (k: string) => { if (failLegacyRemoval && k === 'abbys-dog-chej:db:v1') throw new Error('Remove denied'); storage.delete(k); },
 } });
 let vite: Awaited<ReturnType<typeof createServer>>;
 let store: typeof import('../src/data/store.ts');
@@ -19,6 +20,7 @@ before(async () => {
     if (offline) throw new Error('offline');
     if (unauthorized) return new Response('{}', { status: 401 });
     if (options?.method === 'PUT') {
+      if (offlineWrite) throw new Error('upload interrupted');
       const body = JSON.parse(options.body as string);
       if (body.expectedUpdatedAt !== String(revision)) return new Response('{}', { status: 409 });
       remote = body.blob; revision++;
@@ -33,13 +35,22 @@ before(async () => {
 });
 after(async () => { store.resetLocalStore(); await vite.close(); globalThis.fetch = originalFetch; });
 async function setup() {
-  store.resetLocalStore(); storage.clear(); offline = lostAck = unauthorized = failStorage = false;
+  store.resetLocalStore(); storage.clear(); offline = offlineWrite = lostAck = unauthorized = failStorage = failLegacyRemoval = failLegacyRead = failLegacyClaim = false;
   remote = data.emptyDatabase(); revision = 0;
   await store.hydrateFromServer('abby');
   const dog = store.createDog('Hubble', 'folder'); await store.retrySync();
   return dog;
 }
 const input = (dogId: string, notes = 'training') => ({ dogId, phase: 'Phase 1' as const, redFlag: false, locationId: null, notes, picture: null, skillIds: [], milestoneIds: [], distractions: [], sessionDate: '2026-09-14' });
+
+function seedPreAccountData(reportId = 'legacy-only-report'): string {
+  const legacy = data.emptyDatabase();
+  legacy.dogs = [{ id: 'legacy-dog', name: 'Legacy dog' } as Database['dogs'][number]];
+  legacy.reports = [{ id: reportId, dogId: 'legacy-dog', notes: 'Only local copy', createdDate: '2026-09-14T10:00:00Z', updatedDate: '2026-09-14T10:00:00Z' } as Database['reports'][number]];
+  const raw = JSON.stringify(legacy);
+  storage.set('abbys-dog-chej:db:v1', raw);
+  return raw;
+}
 
 test('real report save: offline acknowledgement is local only; rehydrate preserves and uploads after relaunch', async () => {
   const dog = await setup(); offline = true;
@@ -83,6 +94,150 @@ test('legacy cache differences are retained for recovery instead of overwritten 
   await store.hydrateFromServer('abby'); await store.retrySync();
   assert.ok(store.getSyncState().blob.reports.some(r => r.id === 'old-cache-log'));
   assert.ok(remote.reports.some(r => r.id === 'old-cache-log'));
+});
+
+test('hydrating a populated account preserves an unclaimed pre-account report', async () => {
+  store.resetLocalStore(); storage.clear();
+  offline = offlineWrite = lostAck = unauthorized = failStorage = failLegacyRemoval = failLegacyRead = false;
+  const original = seedPreAccountData();
+  remote = data.emptyDatabase();
+  remote.dogs = [{ id: 'account-dog', name: 'Account dog' } as Database['dogs'][number]];
+  revision = 0;
+
+  await store.hydrateFromServer('other');
+  await store.retrySync();
+
+  assert.ok(storage.has('abbys-dog-chej:db:v1'));
+  assert.equal(storage.get('abbys-dog-chej:db:v1'), original);
+  assert.equal(storage.has('abbys-dog-chej:db:v1:claimed'), false);
+  assert.equal(remote.reports.length, 0);
+  assert.equal(store.getSyncState().blob.reports.length, 0);
+});
+
+test('repeated hydration and account changes never assign a colliding legacy ID', async () => {
+  store.resetLocalStore(); storage.clear();
+  offline = offlineWrite = lostAck = unauthorized = failStorage = failLegacyRemoval = failLegacyRead = false;
+  const original = seedPreAccountData('same-report-id');
+  remote = data.emptyDatabase();
+  remote.dogs = [{ id: 'account-dog', name: 'Account dog' } as Database['dogs'][number]];
+  remote.reports = [{ id: 'same-report-id', dogId: 'account-dog', notes: 'Different account record', createdDate: '2026-09-14T11:00:00Z' } as Database['reports'][number]];
+  revision = 0;
+  const accountDocument = JSON.stringify(remote);
+
+  await store.hydrateFromServer('first-account');
+  await store.hydrateFromServer('first-account');
+  store.resetLocalStore();
+  await store.hydrateFromServer('second-account');
+  await store.retrySync();
+
+  assert.equal(storage.get('abbys-dog-chej:db:v1'), original);
+  assert.equal(storage.has('abbys-dog-chej:db:v1:claimed'), false);
+  assert.equal(JSON.stringify(remote), accountDocument);
+  assert.equal(store.getImportableLegacyDatabase(), null);
+  assert.equal(store.getSyncState().blob.reports[0].notes, 'Different account record');
+  await assert.rejects(store.importLegacyDatabase(), /already has data/);
+});
+
+test('legacy-only data is imported once into an empty account after server confirmation', async () => {
+  store.resetLocalStore(); storage.clear();
+  offline = offlineWrite = lostAck = unauthorized = failStorage = failLegacyRemoval = failLegacyRead = false;
+  seedPreAccountData();
+  remote = data.emptyDatabase(); revision = 0;
+  await store.hydrateFromServer('empty-account');
+  assert.equal(store.getImportableLegacyDatabase()?.reports[0].id, 'legacy-only-report');
+
+  await store.importLegacyDatabase();
+  assert.equal(remote.reports.filter(r => r.id === 'legacy-only-report').length, 1);
+  assert.equal(storage.has('abbys-dog-chej:db:v1'), false);
+  assert.equal(storage.get('abbys-dog-chej:db:v1:claimed'), 'true');
+
+  store.resetLocalStore();
+  await store.hydrateFromServer('empty-account');
+  await store.retrySync();
+  assert.equal(remote.reports.filter(r => r.id === 'legacy-only-report').length, 1);
+  await assert.rejects(store.importLegacyDatabase(), /already has data/);
+});
+
+test('interrupted import retains the original across restart and another account', async () => {
+  store.resetLocalStore(); storage.clear();
+  offline = offlineWrite = lostAck = unauthorized = failStorage = failLegacyRemoval = failLegacyRead = false;
+  const original = seedPreAccountData();
+  remote = data.emptyDatabase(); revision = 0;
+  await store.hydrateFromServer('empty-account');
+  offlineWrite = true;
+  await assert.rejects(store.importLegacyDatabase(), /pending/);
+  assert.equal(storage.get('abbys-dog-chej:db:v1'), original);
+  assert.equal(storage.has('abbys-dog-chej:db:v1:claimed'), false);
+
+  store.resetLocalStore(); offlineWrite = false;
+  remote = data.emptyDatabase();
+  remote.dogs = [{ id: 'other-dog', name: 'Other dog' } as Database['dogs'][number]];
+  await store.hydrateFromServer('other-account');
+  await store.retrySync();
+  assert.equal(remote.reports.length, 0);
+  assert.equal(storage.get('abbys-dog-chej:db:v1'), original);
+  assert.ok(storage.get('abbys-dog-chej:outbox:empty-account')?.includes('legacy-only-report'));
+});
+
+test('lost import acknowledgement and failed removal retain the legacy source', async () => {
+  store.resetLocalStore(); storage.clear();
+  offline = offlineWrite = lostAck = unauthorized = failStorage = failLegacyRemoval = failLegacyRead = false;
+  const original = seedPreAccountData();
+  remote = data.emptyDatabase(); revision = 0;
+  await store.hydrateFromServer('empty-account');
+  lostAck = true;
+  await assert.rejects(store.importLegacyDatabase(), /pending/);
+  assert.equal(remote.reports.filter(r => r.id === 'legacy-only-report').length, 1);
+  assert.equal(storage.get('abbys-dog-chej:db:v1'), original);
+  lostAck = false;
+  await store.retrySync();
+  assert.equal(remote.reports.filter(r => r.id === 'legacy-only-report').length, 1);
+  assert.equal(storage.get('abbys-dog-chej:db:v1'), original);
+
+  store.resetLocalStore(); storage.clear();
+  seedPreAccountData(); remote = data.emptyDatabase(); revision = 0;
+  await store.hydrateFromServer('empty-account');
+  failLegacyRemoval = true;
+  await assert.rejects(store.importLegacyDatabase(), /Remove denied/);
+  assert.equal(remote.reports.filter(r => r.id === 'legacy-only-report').length, 1);
+  assert.equal(storage.has('abbys-dog-chej:db:v1'), true);
+  assert.equal(storage.has('abbys-dog-chej:db:v1:claimed'), false);
+  failLegacyRemoval = false;
+});
+
+test('unreadable legacy storage is never cleared or claimed by hydration', async () => {
+  store.resetLocalStore(); storage.clear();
+  offline = offlineWrite = lostAck = unauthorized = failStorage = failLegacyRemoval = failLegacyRead = false;
+  const original = seedPreAccountData();
+  remote = data.emptyDatabase();
+  remote.dogs = [{ id: 'account-dog', name: 'Account dog' } as Database['dogs'][number]];
+  revision = 0; failLegacyRead = true;
+  await store.hydrateFromServer('account');
+  failLegacyRead = false;
+  assert.equal(storage.get('abbys-dog-chej:db:v1'), original);
+  assert.equal(storage.has('abbys-dog-chej:db:v1:claimed'), false);
+});
+
+test('failed explicit decline keeps pre-account data unclaimed for a retry', () => {
+  store.resetLocalStore(); storage.clear();
+  failLegacyRemoval = false; failLegacyRead = false;
+  const original = seedPreAccountData();
+  failLegacyRemoval = true;
+  assert.throws(() => store.declineLegacyImport(), /Remove denied/);
+  assert.equal(storage.get('abbys-dog-chej:db:v1'), original);
+  assert.equal(storage.has('abbys-dog-chej:db:v1:claimed'), false);
+  failLegacyRemoval = false;
+});
+
+test('successful explicit decline does not report a redundant marker write failure', () => {
+  store.resetLocalStore(); storage.clear();
+  failLegacyRemoval = false; failLegacyRead = false; failLegacyClaim = false;
+  seedPreAccountData();
+  failLegacyClaim = true;
+  assert.doesNotThrow(() => store.declineLegacyImport());
+  assert.equal(storage.has('abbys-dog-chej:db:v1'), false);
+  assert.equal(storage.has('abbys-dog-chej:db:v1:claimed'), false);
+  failLegacyClaim = false;
 });
 
 test('editing the form after failed persistence updates privacy and skills on the same log', async () => {
