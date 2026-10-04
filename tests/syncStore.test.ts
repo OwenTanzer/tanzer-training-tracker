@@ -218,6 +218,17 @@ test('unreadable legacy storage is never cleared or claimed by hydration', async
   assert.equal(storage.has('abbys-dog-chej:db:v1:claimed'), false);
 });
 
+test('failed explicit decline keeps pre-account data unclaimed for a retry', () => {
+  store.resetLocalStore(); storage.clear();
+  failLegacyRemoval = false; failLegacyRead = false;
+  const original = seedPreAccountData();
+  failLegacyRemoval = true;
+  assert.throws(() => store.declineLegacyImport(), /Remove denied/);
+  assert.equal(storage.get('abbys-dog-chej:db:v1'), original);
+  assert.equal(storage.has('abbys-dog-chej:db:v1:claimed'), false);
+  failLegacyRemoval = false;
+});
+
 test('editing the form after failed persistence updates privacy and skills on the same log', async () => {
   const dog = await setup(); const skill = store.getSyncState().blob.checklistItems[0];
   failStorage = true; offline = true;
