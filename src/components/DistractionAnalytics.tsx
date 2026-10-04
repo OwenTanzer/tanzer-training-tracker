@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router-dom';
 import { calendarDateAtLocalNoon, localSessionDate } from '../../shared/sessionDate';
 import {
   createDogEvent,
@@ -7,6 +8,8 @@ import {
   useDogEvents,
 } from '../data/store';
 import {
+  distractionLabel,
+  reportsForDistraction,
   distractionSeverityRank,
   distractionTimeline,
   observedSeverityLabels,
@@ -18,6 +21,7 @@ import {
   type DistractionSeverity,
   type DistractionTemplate,
   type DogEvent,
+  type Location,
   type TrainingReport,
 } from '../types';
 import { PencilIcon, TrashIcon } from './icons';
@@ -31,6 +35,17 @@ const SEVERITY_COLORS: Record<DistractionSeverity, string> = {
   Moderate: '#f59e0b',
   Severe: '#ef4444',
 };
+
+type DistractionEntry = {
+  kind: 'category' | 'detail';
+  dogId: string;
+  categoryId: string;
+  categoryKey?: string;
+};
+
+// Browser history cannot remove an entry in the middle of the stack. When a
+// detail is closed, skip its dismissed category on later Back/Forward visits.
+const dismissedCategoryKeys = new Set<string>();
 
 function displayDate(date: string): string {
   return calendarDateAtLocalNoon(date).toLocaleDateString();
@@ -153,27 +168,114 @@ export function DistractionAnalytics({
   dogId,
   reports,
   templates,
+  locations,
+  renderReport,
+  onLeaveDetails,
 }: {
   dogId: string;
   reports: TrainingReport[];
   templates: DistractionTemplate[];
+  locations: Location[];
+  renderReport: (report: TrainingReport) => ReactNode;
+  onLeaveDetails: () => void;
 }) {
   const events = useDogEvents(dogId);
-  const summaries = useMemo(() => summarizeDistractions(reports), [reports]);
+  const dogReports = useMemo(() => reports.filter((report) => report.dogId === dogId), [reports, dogId]);
+  const summaries = useMemo(() => summarizeDistractions(dogReports), [dogReports]);
   const summaryRows = summaries.map((summary) => ({
     ...summary,
-    title:
-      templates.find((template) => template.id === summary.distractionId)?.title ??
-      'Unknown distraction',
+    title: distractionLabel(templates, summary.distractionId),
   }));
   const [selectedId, setSelectedId] = useState('');
   const effectiveSelectedId = summaryRows.some((summary) => summary.distractionId === selectedId)
     ? selectedId
     : (summaryRows[0]?.distractionId ?? '');
   const points = useMemo(
-    () => distractionTimeline(reports, effectiveSelectedId),
-    [effectiveSelectedId, reports],
+    () => distractionTimeline(dogReports, effectiveSelectedId),
+    [effectiveSelectedId, dogReports],
   );
+  // URL state gives browser/phone Back the same list → summary behavior as
+  // the visible controls, without changing the application's routes or store.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const routeLocation = useLocation();
+  const navigate = useNavigate();
+  const navigationType = useNavigationType();
+  const entry = (routeLocation.state as { distractionEntry?: DistractionEntry } | null)?.distractionEntry;
+  const categoryId = searchParams.get('distraction');
+  const reportId = searchParams.get('distractionLog');
+  const historyIndex = window.history.state?.idx as number | undefined;
+  const previousHistoryIndex = useRef(historyIndex);
+  useEffect(() => {
+    const previous = previousHistoryIndex.current;
+    previousHistoryIndex.current = historyIndex;
+    if (categoryId !== null && navigationType === 'POP' && dismissedCategoryKeys.has(routeLocation.key)) {
+      navigate(typeof previous === 'number' && typeof historyIndex === 'number' && historyIndex > previous ? 1 : -1);
+    }
+  }, [categoryId, historyIndex, routeLocation.key, navigate, navigationType]);
+  const matchingReports = useMemo(
+    () => categoryId === null ? [] : reportsForDistraction(dogReports, dogId, categoryId),
+    [dogReports, dogId, categoryId],
+  );
+  const detailReport = matchingReports.find((report) => report.id === reportId);
+  const detailVisible = categoryId !== null && detailReport !== undefined;
+  const previousDetail = useRef({ dogId, categoryId, reportId, detailVisible });
+  useEffect(() => {
+    const previous = previousDetail.current;
+    if (previous.reportId && (
+      previous.reportId !== reportId || previous.categoryId !== categoryId ||
+      previous.dogId !== dogId || (previous.detailVisible && !detailVisible)
+    )) {
+      onLeaveDetails();
+    }
+    previousDetail.current = { dogId, categoryId, reportId, detailVisible };
+  }, [dogId, categoryId, reportId, detailVisible, onLeaveDetails]);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (categoryId !== null && !dismissedCategoryKeys.has(routeLocation.key)) {
+      if (!dialog?.open) dialog?.showModal();
+      if (dialog) dialog.scrollTop = 0;
+      headingRef.current?.focus();
+    } else if (dialog?.open) {
+      dialog.close();
+    }
+  }, [categoryId, reportId, routeLocation.key]);
+
+  function openCategory(id: string) {
+    onLeaveDetails();
+    setSelectedId(id);
+    const next = new URLSearchParams(searchParams);
+    next.set('distraction', id);
+    next.delete('distractionLog');
+    setSearchParams(next, { state: { distractionEntry: { kind: 'category', dogId, categoryId: id } satisfies DistractionEntry } });
+  }
+
+  function closeLogs() {
+    onLeaveDetails();
+    if (entry?.kind === 'category' && entry.dogId === dogId && entry.categoryId === categoryId) {
+      dismissedCategoryKeys.add(routeLocation.key);
+    }
+    if (reportId && entry?.kind === 'detail' && entry.dogId === dogId && entry.categoryId === categoryId && entry.categoryKey) {
+      dismissedCategoryKeys.add(entry.categoryKey);
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('distraction');
+    next.delete('distractionLog');
+    setSearchParams(next, { replace: true, state: null });
+  }
+
+  function backToMatches() {
+    onLeaveDetails();
+    if (entry?.kind === 'detail' && entry.dogId === dogId && entry.categoryId === categoryId && entry.categoryKey && !dismissedCategoryKeys.has(entry.categoryKey)) {
+      navigate(-1);
+      return;
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('distractionLog');
+    setSearchParams(next, { replace: true, state: null });
+  }
+
   const [newEventDate, setNewEventDate] = useState(localSessionDate);
   const [newEventLabel, setNewEventLabel] = useState('');
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
@@ -225,7 +327,8 @@ export function DistractionAnalytics({
               <button
                 key={summary.distractionId}
                 type="button"
-                onClick={() => setSelectedId(summary.distractionId)}
+                onClick={() => openCategory(summary.distractionId)}
+                aria-haspopup="dialog"
                 className={`rounded-xl border p-3 text-left ${
                   effectiveSelectedId === summary.distractionId
                     ? 'border-sky-400 bg-sky-50 dark:bg-sky-950/30'
@@ -235,6 +338,7 @@ export function DistractionAnalytics({
                 <span className="font-medium text-gray-900 dark:text-gray-100">
                   {summary.title}
                 </span>
+                <span className="mt-1 block text-sm text-sky-600 dark:text-sky-400">View matching logs →</span>
                 <span className="mt-1 block text-xs text-gray-500">
                   Median observed response: {summary.medianSeverity} - {summary.observations}{' '}
                   {summary.observations === 1 ? 'observation' : 'observations'}
@@ -280,6 +384,59 @@ export function DistractionAnalytics({
           </div>
         </>
       )}
+
+      <dialog
+        ref={dialogRef}
+        aria-labelledby="distraction-logs-heading"
+        onCancel={(event) => { event.preventDefault(); closeLogs(); }}
+        className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-2xl overflow-y-auto rounded-xl border border-gray-200 bg-white p-4 text-gray-900 shadow-xl backdrop:bg-black/50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+      >
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <button type="button" onClick={reportId ? backToMatches : closeLogs}
+              className="min-h-11 rounded-md px-3 py-2 text-sm font-medium text-sky-600 hover:bg-sky-50 dark:text-sky-400 dark:hover:bg-gray-800">
+              {reportId ? '← Back to matching logs' : '← Back to summary'}
+            </button>
+            <button type="button" onClick={closeLogs}
+              className="min-h-11 rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600">Close</button>
+          </div>
+          <div>
+            <h2 id="distraction-logs-heading" ref={headingRef} tabIndex={-1} className="break-words text-lg font-semibold">
+              {categoryId !== null ? distractionLabel(templates, categoryId) : 'Distraction logs'}
+            </h2>
+            <p className="text-sm text-gray-500">{matchingReports.length} matching {matchingReports.length === 1 ? 'log' : 'logs'} · Newest first</p>
+          </div>
+          {reportId ? (
+            detailReport ? <ul className="space-y-2 break-words">{renderReport(detailReport)}</ul> :
+              <p role="status">This log is no longer available in this category. Return to matching logs to see current results.</p>
+          ) : matchingReports.length === 0 ? (
+            <p role="status" className="rounded-lg border border-dashed border-gray-300 p-4 text-sm dark:border-gray-600">
+              No training logs for this dog record this category. Unlogged categories are not counted as Absent. Return to the summary to choose another category.
+            </p>
+          ) : (
+            <ul className="space-y-3">
+              {matchingReports.map((report) => {
+                const location = locations.find((item) => item.id === report.locationId);
+                return <li key={report.id} className="space-y-2 break-words rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                  <p className="font-medium"><time dateTime={report.sessionDate}>{displayDate(report.sessionDate)}</time> · {report.phase}</p>
+                  <p className="text-sm">Recorded severity: {report.distractions.filter((item) => item.distractionId === categoryId).map((item) => item.severity).join(', ')}</p>
+                  {location && <p className="text-sm text-gray-500">Location: {location.name}</p>}
+                  {report.redFlag && <p className="text-sm text-red-500">🚩 Red flagged</p>}
+                  <p className="whitespace-pre-wrap text-sm">{report.notes || 'No session notes recorded.'}</p>
+                  <button type="button" onClick={() => {
+                    onLeaveDetails();
+                    const next = new URLSearchParams(searchParams);
+                    next.set('distractionLog', report.id);
+                    setSearchParams(next, { state: { distractionEntry: { kind: 'detail', dogId, categoryId: categoryId!, categoryKey: entry?.kind === 'category' && entry.dogId === dogId && entry.categoryId === categoryId ? routeLocation.key : undefined } satisfies DistractionEntry } });
+                  }} className="min-h-11 rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-700">
+                    Open full log details
+                  </button>
+                </li>;
+              })}
+            </ul>
+          )}
+        </div>
+      </dialog>
 
       <div className="space-y-2 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
         <div>

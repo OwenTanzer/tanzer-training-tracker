@@ -9,6 +9,8 @@ import {
 } from '../../shared/sessionDate';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { distractionLabel } from '../lib/distractionAnalytics';
+import { useSession } from '../lib/auth';
 import { DistractionAnalytics } from '../components/DistractionAnalytics';
 import { MoveDialog } from '../components/MoveDialog';
 import { DailyWorkBadge } from '../components/DailyWorkStatus';
@@ -66,11 +68,42 @@ import {
   type TrainingReport,
 } from '../types';
 
+type ReportEditDraft = {
+  redFlag: boolean;
+  locationId: string;
+  notes: string;
+  sessionDate: string;
+  skillIds: string[];
+  milestoneIds: string[];
+  distractionSeverities: Record<string, DistractionSeverity | ''>;
+  dirty: boolean;
+};
+
+// Keep unsaved drafts across DogProfile route unmounts in this tab. The owner
+// key prevents one signed-in instructor from seeing another's drafts.
+const reportDraftCache = new Map<string, Record<string, ReportEditDraft>>();
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', (event) => {
+    // The guard stays active while another route is shown. Only the current
+    // instructor's drafts can trigger it; another account's cache is ignored.
+    let ownerId = '';
+    try {
+      ownerId = (JSON.parse(localStorage.getItem('abbys-dog-chej:session') ?? 'null') as { instructorId?: string } | null)?.instructorId ?? '';
+    } catch { /* No active session. */ }
+    if (ownerId && Object.values(reportDraftCache.get(ownerId) ?? {}).some((draft) => draft.dirty)) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
+}
+
 function EditReportForm({
   report,
   currentPhase,
   locations,
   distractionTemplates,
+  draft,
+  onDraftChange,
   onCancel,
   onSaved,
 }: {
@@ -78,40 +111,30 @@ function EditReportForm({
   currentPhase: Phase;
   locations: Location[];
   distractionTemplates: DistractionTemplate[];
+  draft: ReportEditDraft;
+  onDraftChange: (draft: ReportEditDraft) => void;
   onCancel: () => void;
   onSaved: () => void;
 }) {
   const skills = useChecklistItems();
   const milestones = useMilestoneTemplates();
-  const [redFlag, setRedFlag] = useState(report.redFlag);
-  const [locationId, setLocationId] = useState(report.locationId ?? '');
-  const [notes, setNotes] = useState(report.notes);
-  const [sessionDate, setSessionDate] = useState(report.sessionDate);
-  // Keep valid historical selections from every phase while dropping ids for
-  // templates that have since been deleted.
-  const [skillIds, setSkillIds] = useState<string[]>(() =>
-    filterValidPhaseItemIds(report.skillIds, skills),
-  );
-  const [milestoneIds, setMilestoneIds] = useState<string[]>(() =>
-    filterValidPhaseItemIds(report.milestoneIds, milestones),
-  );
-  const [distractionSeverities, setDistractionSeverities] = useState<
-    Record<string, DistractionSeverity | ''>
-  >(() =>
-    Object.fromEntries(report.distractions.map((d) => [d.distractionId, d.severity])),
-  );
+  const { redFlag, locationId, notes, sessionDate, skillIds, milestoneIds, distractionSeverities } = draft;
   const [error, setError] = useState<string | null>(null);
 
+  function changeDraft(change: Partial<ReportEditDraft>) {
+    onDraftChange({ ...draft, ...change, dirty: true });
+  }
+
   function toggleSkill(id: string) {
-    setSkillIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
+    changeDraft({ skillIds: skillIds.includes(id) ? skillIds.filter((s) => s !== id) : [...skillIds, id] });
   }
 
   function toggleMilestone(id: string) {
-    setMilestoneIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
+    changeDraft({ milestoneIds: milestoneIds.includes(id) ? milestoneIds.filter((s) => s !== id) : [...milestoneIds, id] });
   }
 
   function setDistractionSeverity(distractionId: string, severity: DistractionSeverity | '') {
-    setDistractionSeverities((prev) => ({ ...prev, [distractionId]: severity }));
+    changeDraft({ distractionSeverities: { ...distractionSeverities, [distractionId]: severity } });
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -152,7 +175,7 @@ function EditReportForm({
         <input
           type="date"
           value={sessionDate}
-          onChange={(e) => setSessionDate(e.target.value)}
+          onChange={(e) => changeDraft({ sessionDate: e.target.value })}
           max={localSessionDate()}
           required
           className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
@@ -205,12 +228,12 @@ function EditReportForm({
         ))}
       </div>
       <label className="flex items-center gap-2">
-        <input type="checkbox" checked={redFlag} onChange={(e) => setRedFlag(e.target.checked)} />
+        <input type="checkbox" checked={redFlag} onChange={(e) => changeDraft({ redFlag: e.target.checked })} />
         🚩 Red flag this log
       </label>
       <select
         value={locationId}
-        onChange={(e) => setLocationId(e.target.value)}
+        onChange={(e) => changeDraft({ locationId: e.target.value })}
         className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
       >
         <option value="">No location</option>
@@ -222,7 +245,7 @@ function EditReportForm({
       </select>
       <textarea
         value={notes}
-        onChange={(e) => setNotes(e.target.value)}
+        onChange={(e) => changeDraft({ notes: e.target.value })}
         rows={4}
         className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1"
       />
@@ -427,6 +450,7 @@ function PreservedMilestoneAttemptHistory({
 
 
 export function DogProfile() {
+  const session = useSession();
   const { dogId } = useParams<{ dogId: string }>();
   const navigate = useNavigate();
   const dog = useDog(dogId);
@@ -454,7 +478,21 @@ export function DogProfile() {
   const [selfName, setSelfName] = useState(dog?.name ?? '');
   const [moving, setMoving] = useState(false);
   const [pendingPhotoFile, setPendingPhotoFile] = useState<File | null>(null);
-  const [editingReportId, setEditingReportId] = useState<string | null>(null);
+  const draftOwnerId = session?.instructorId ?? '';
+  const [editingReport, setEditingReport] = useState<{ ownerId: string; dogId: string; id: string; surface: 'dialog' | 'history' } | null>(null);
+  const [ownedDrafts, setOwnedDrafts] = useState(() => ({
+    ownerId: draftOwnerId,
+    drafts: reportDraftCache.get(draftOwnerId) ?? {},
+  }));
+  const reportDrafts = ownedDrafts.ownerId === draftOwnerId
+    ? ownedDrafts.drafts : (reportDraftCache.get(draftOwnerId) ?? {});
+  function setReportDrafts(update: (previous: Record<string, ReportEditDraft>) => Record<string, ReportEditDraft>) {
+    // Update the cache synchronously before a route change can unmount this page.
+    const drafts = update(reportDraftCache.get(draftOwnerId) ?? reportDrafts);
+    if (draftOwnerId) reportDraftCache.set(draftOwnerId, drafts);
+    setOwnedDrafts({ ownerId: draftOwnerId, drafts });
+  }
+  useEffect(() => setEditingReport(null), [dogId, draftOwnerId]);
   const [transferring, setTransferring] = useState(false);
   const [transferName, setTransferName] = useState('');
   const [transferBusy, setTransferBusy] = useState(false);
@@ -486,6 +524,144 @@ export function DogProfile() {
 
   if (!dog) {
     return <p className="p-4 text-gray-500">Dog not found.</p>;
+  }
+
+  function reportDraftKey(r: TrainingReport) {
+    return JSON.stringify([r.dogId, r.id]);
+  }
+
+  function beginReportEdit(r: TrainingReport, surface: 'dialog' | 'history') {
+    const key = reportDraftKey(r);
+    setReportDrafts((previous) => previous[key] ? previous : {
+      ...previous,
+      [key]: {
+        redFlag: r.redFlag,
+        locationId: r.locationId ?? '',
+        notes: r.notes,
+        sessionDate: r.sessionDate,
+        // Keep valid historical selections from every phase while dropping
+        // templates that have since been deleted.
+        skillIds: filterValidPhaseItemIds(r.skillIds, allChecklistItems),
+        milestoneIds: filterValidPhaseItemIds(r.milestoneIds, allMilestoneTemplates),
+        distractionSeverities: Object.fromEntries(r.distractions.map((d) => [d.distractionId, d.severity])),
+        dirty: false,
+      },
+    });
+    setEditingReport({ ownerId: draftOwnerId, dogId: r.dogId, id: r.id, surface });
+  }
+
+  function clearReportDraft(r: TrainingReport) {
+    const key = reportDraftKey(r);
+    setReportDrafts((previous) => {
+      const next = { ...previous };
+      delete next[key];
+      return next;
+    });
+    setEditingReport(null);
+  }
+
+  function renderReport(r: TrainingReport, surface: 'dialog' | 'history') {
+    if (!dog) return null;
+
+    const location = locations.find((l) => l.id === r.locationId);
+    const draftKey = reportDraftKey(r);
+    if (editingReport?.ownerId === draftOwnerId && editingReport.dogId === r.dogId && editingReport.id === r.id && editingReport.surface === surface && reportDrafts[draftKey]) {
+      return (
+        <li
+          key={r.id}
+          className="rounded-lg border border-sky-300 dark:border-sky-700 p-3"
+        >
+          <EditReportForm
+            report={r}
+            currentPhase={dog.currentPhase}
+            locations={locations}
+            distractionTemplates={distractionTemplates}
+            draft={reportDrafts[draftKey]}
+            onDraftChange={(draft) => setReportDrafts((previous) => ({ ...previous, [draftKey]: draft }))}
+            onCancel={() => clearReportDraft(r)}
+            onSaved={() => clearReportDraft(r)}
+          />
+        </li>
+      );
+    }
+    return (
+      <li
+        key={r.id}
+        className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-1"
+      >
+        <div className="flex items-center justify-between text-sm">
+          <span className="font-medium">
+            {r.phase} · {new Date(`${r.sessionDate}T12:00:00`).toLocaleDateString()}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => toggleReportRedFlag(r.id)}
+              aria-pressed={r.redFlag}
+              title="Toggle red flag"
+              className={`flex h-7 w-7 items-center justify-center rounded-full text-sm transition-all duration-150 active:scale-90 ${
+                r.redFlag
+                  ? 'bg-red-100 ring-1 ring-red-400 dark:bg-red-950'
+                  : 'bg-gray-100 opacity-40 grayscale hover:opacity-70 dark:bg-gray-800'
+              }`}
+            >
+              🚩
+            </button>
+            <button
+              onClick={() => beginReportEdit(r, surface)}
+              className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+              title="Edit log"
+            >
+              <PencilIcon />
+            </button>
+            <button
+              onClick={() => handleDeleteReport(r.id)}
+              className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950"
+              title="Delete log"
+            >
+              <TrashIcon />
+            </button>
+          </div>
+        </div>
+        {reportDrafts[draftKey]?.dirty && <p role="status" className="text-xs text-amber-600 dark:text-amber-400">Unsaved draft available. Choose Edit log to resume it.</p>}
+        {location && (
+          <p className="text-xs text-gray-500">📍 {location.name}</p>
+        )}
+        {r.picture && (
+          <img
+            src={r.picture}
+            alt="Training log attachment"
+            className="h-24 w-24 rounded-md object-cover"
+          />
+        )}
+        <p className="text-sm text-gray-700 dark:text-gray-300">{r.notes}</p>
+        {r.skillIds.length > 0 && (
+          <p className="text-xs text-gray-500">
+            Skills worked on:{' '}
+            {r.skillIds
+              .map((id) => allChecklistItems.find((i) => i.id === id)?.title)
+              .filter(Boolean)
+              .join(', ')}
+          </p>
+        )}
+        {r.milestoneIds.length > 0 && (
+          <p className="text-xs text-gray-500">
+            Milestones worked on:{' '}
+            {r.milestoneIds
+              .map((id) => allMilestoneTemplates.find((m) => m.id === id)?.title)
+              .filter(Boolean)
+              .join(', ')}
+          </p>
+        )}
+        {r.distractions.length > 0 && (
+          <p className="text-xs text-gray-500">
+            Distractions:{' '}
+            {r.distractions
+              .map((d) => `${distractionLabel(distractionTemplates, d.distractionId)} (${d.severity})`)
+              .join(', ')}
+          </p>
+        )}
+      </li>
+    );
   }
 
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1118,9 +1294,13 @@ export function DogProfile() {
       </section>
 
       <DistractionAnalytics
+        key={dog.id}
         dogId={dog.id}
         reports={allReports}
         templates={distractionTemplates}
+        locations={locations}
+        renderReport={(report) => renderReport(report, 'dialog')}
+        onLeaveDetails={() => setEditingReport(null)}
       />
 
       <section className="space-y-2">
@@ -1156,109 +1336,7 @@ export function DogProfile() {
           />
         </div>
         <ul className="space-y-2">
-          {reports.map((r) => {
-            const location = locations.find((l) => l.id === r.locationId);
-            if (editingReportId === r.id) {
-              return (
-                <li
-                  key={r.id}
-                  className="rounded-lg border border-sky-300 dark:border-sky-700 p-3"
-                >
-                  <EditReportForm
-                    report={r}
-                    currentPhase={dog.currentPhase}
-                    locations={locations}
-                    distractionTemplates={distractionTemplates}
-                    onCancel={() => setEditingReportId(null)}
-                    onSaved={() => setEditingReportId(null)}
-                  />
-                </li>
-              );
-            }
-            return (
-              <li
-                key={r.id}
-                className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-1"
-              >
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium">
-                    {r.phase} · {new Date(`${r.sessionDate}T12:00:00`).toLocaleDateString()}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => toggleReportRedFlag(r.id)}
-                      aria-pressed={r.redFlag}
-                      title="Toggle red flag"
-                      className={`flex h-7 w-7 items-center justify-center rounded-full text-sm transition-all duration-150 active:scale-90 ${
-                        r.redFlag
-                          ? 'bg-red-100 ring-1 ring-red-400 dark:bg-red-950'
-                          : 'bg-gray-100 opacity-40 grayscale hover:opacity-70 dark:bg-gray-800'
-                      }`}
-                    >
-                      🚩
-                    </button>
-                    <button
-                      onClick={() => setEditingReportId(r.id)}
-                      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-                      title="Edit log"
-                    >
-                      <PencilIcon />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteReport(r.id)}
-                      className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950"
-                      title="Delete log"
-                    >
-                      <TrashIcon />
-                    </button>
-                  </div>
-                </div>
-                {location && (
-                  <p className="text-xs text-gray-500">📍 {location.name}</p>
-                )}
-                {r.picture && (
-                  <img
-                    src={r.picture}
-                    alt="Training log attachment"
-                    className="h-24 w-24 rounded-md object-cover"
-                  />
-                )}
-                <p className="text-sm text-gray-700 dark:text-gray-300">{r.notes}</p>
-                {r.skillIds.length > 0 && (
-                  <p className="text-xs text-gray-500">
-                    Skills worked on:{' '}
-                    {r.skillIds
-                      .map((id) => allChecklistItems.find((i) => i.id === id)?.title)
-                      .filter(Boolean)
-                      .join(', ')}
-                  </p>
-                )}
-                {r.milestoneIds.length > 0 && (
-                  <p className="text-xs text-gray-500">
-                    Milestones worked on:{' '}
-                    {r.milestoneIds
-                      .map((id) => allMilestoneTemplates.find((m) => m.id === id)?.title)
-                      .filter(Boolean)
-                      .join(', ')}
-                  </p>
-                )}
-                {r.distractions.length > 0 && (
-                  <p className="text-xs text-gray-500">
-                    Distractions:{' '}
-                    {r.distractions
-                      .map((d) => {
-                        const title = distractionTemplates.find(
-                          (t) => t.id === d.distractionId,
-                        )?.title;
-                        return title ? `${title} (${d.severity})` : null;
-                      })
-                      .filter(Boolean)
-                      .join(', ')}
-                  </p>
-                )}
-              </li>
-            );
-          })}
+          {reports.map((report) => renderReport(report, 'history'))}
           {reports.length === 0 && (
             <p className="text-sm text-gray-400">No training logs match these filters.</p>
           )}

@@ -1,0 +1,21 @@
+{
+  "status": "passed",
+  "checks": [
+    "Detail Close skips dismissed category on browser Back/Forward while preserving earlier page",
+    "Back to matching logs and Back to summary do not duplicate category history",
+    "Modal edit uses one form; Back twice deactivates it; Forward stays in view mode; draft resumes and Cancel discards",
+    "Forward to a retained detail after dismissing its category uses the direct-link list fallback",
+    "In-tab route departure preserves a dirty Log History draft until Cancel",
+    "390px: one-tap opening; selected category; count; session-date order; Absent; notes/context; dog and shared-overlay isolation; no horizontal overflow",
+    "Full existing details, visible Back controls, repeated category selection and browser Back from detail/list",
+    "Close, Escape, different/repeated selections and retired category labels in summary/list/details",
+    "Direct detail links, missing/deleted record fallback and Escape close preserve prior history",
+    "Removing the category while retaining a detail ID deactivates edit; Forward resumes in view mode",
+    "Empty state; switching dogs deactivates the editor and retains that dog’s draft; stale detail URL cannot expose another dog’s log",
+    "320px matching-list layout has no horizontal overflow",
+    "No page errors, API writes or external/production requests"
+  ],
+  "errors": [],
+  "writes": [],
+  "external": []
+}

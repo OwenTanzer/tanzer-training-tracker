@@ -1,6 +1,7 @@
 import {
   DISTRACTION_SEVERITIES,
   type DistractionSeverity,
+  type DistractionTemplate,
   type TrainingReport,
 } from '../types.ts';
 
@@ -103,4 +104,31 @@ export function observedSeverityLabels(
   return DISTRACTION_SEVERITIES.filter((severity) => distribution[severity] > 0)
     .map((severity) => `${severity} ${distribution[severity]}`)
     .join(' / ');
+}
+
+// Only local TrainingReports belong here; shared pass-back projections have
+// foreign category IDs and must remain in their separate history overlay.
+export function reportsForDistraction(
+  reports: readonly TrainingReport[],
+  dogId: string,
+  distractionId: string,
+): TrainingReport[] {
+  const seen = new Set<string>();
+  return reports
+    .filter((report) => {
+      if (report.dogId !== dogId || seen.has(report.id) ||
+          !report.distractions.some((item) => item.distractionId === distractionId)) return false;
+      seen.add(report.id);
+      return true;
+    })
+    .sort((a, b) => b.sessionDate.localeCompare(a.sessionDate) ||
+      b.createdDate.localeCompare(a.createdDate));
+}
+
+export function distractionLabel(
+  templates: readonly DistractionTemplate[],
+  distractionId: string,
+): string {
+  return templates.find((template) => template.id === distractionId)?.title.trim() ||
+    `Unknown distraction (${distractionId})`;
 }

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   distractionTimeline,
+  reportsForDistraction,
+  distractionLabel,
   summarizeDistractions,
 } from '../src/lib/distractionAnalytics.ts';
 import type {
@@ -79,4 +81,49 @@ test('timeline contains only explicitly logged observations and sorts chronologi
     { reportId: 'later', date: '2026-07-03', severity: 'Severe' },
   ]);
   assert.deepEqual(distractionTimeline(reports, 'unknown'), []);
+});
+
+test('matching logs isolate the dog and stored category ID, never notes or labels', () => {
+  const matching = report('match', '2026-07-01', [{ distractionId: 'traffic', severity: 'Mild' }]);
+  const otherDog = { ...matching, id: 'other-dog', dogId: 'dog-2' };
+  const notesOnly = { ...report('notes', '2026-07-02', []), notes: 'traffic' };
+  const similarId = report('similar', '2026-07-03', [{ distractionId: 'traffic-other', severity: 'Severe' }]);
+  assert.deepEqual(reportsForDistraction([otherDog, notesOnly, similarId, matching], 'dog-1', 'traffic'), [matching]);
+});
+
+test('explicit Absent is included, missing observations are excluded, and reports appear once', () => {
+  const absent = report('absent', '2026-07-01', [
+    { distractionId: 'traffic', severity: 'Absent' },
+    { distractionId: 'dogs', severity: 'Severe' },
+    { distractionId: 'traffic', severity: 'Absent' },
+  ]);
+  const missing = report('missing', '2026-07-02', []);
+  assert.deepEqual(reportsForDistraction([absent, missing, absent], 'dog-1', 'traffic'), [absent]);
+  assert.equal(absent.distractions[0].severity, 'Absent');
+});
+
+test('matching logs sort newest session first, then creation time, without mutating input', () => {
+  const observation = [{ distractionId: 'traffic', severity: 'Mild' as const }];
+  const oldSession = { ...report('backfilled', '2026-06-01', observation), createdDate: '2026-08-01T12:00:00Z' };
+  const early = report('early', '2026-07-01', observation);
+  const late = { ...early, id: 'late', createdDate: '2026-07-01T16:00:00Z' };
+  const input = [oldSession, early, late];
+  assert.deepEqual(reportsForDistraction(input, 'dog-1', 'traffic').map((r) => r.id), ['late', 'early', 'backfilled']);
+  assert.deepEqual(input.map((r) => r.id), ['backfilled', 'early', 'late']);
+});
+
+test('empty inputs, unknown categories and another dog have empty results', () => {
+  const logs = [report('r1', '2026-07-01', [{ distractionId: 'traffic', severity: 'Mild' }])];
+  assert.deepEqual(reportsForDistraction([], 'dog-1', 'traffic'), []);
+  assert.deepEqual(reportsForDistraction(logs, 'dog-1', 'unknown'), []);
+  assert.deepEqual(reportsForDistraction(logs, 'dog-2', 'traffic'), []);
+});
+
+test('missing or retired template labels retain identifiable categories and matching logs', () => {
+  const template = { id: 'traffic', title: 'Road traffic', sortOrder: 0, createdDate: '', updatedDate: '' };
+  assert.equal(distractionLabel([template], 'traffic'), 'Road traffic');
+  assert.equal(distractionLabel([], 'retired-id'), 'Unknown distraction (retired-id)');
+  assert.equal(distractionLabel([{ ...template, title: '  ' }], 'traffic'), 'Unknown distraction (traffic)');
+  const retired = report('retired', '2026-07-01', [{ distractionId: 'retired-id', severity: 'Absent' }]);
+  assert.deepEqual(reportsForDistraction([retired], 'dog-1', 'retired-id'), [retired]);
 });
