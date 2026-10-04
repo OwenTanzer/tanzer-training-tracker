@@ -1,0 +1,425 @@
+(node:62) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> tanzer-training-tracker@0.0.0 test
+> node --experimental-strip-types --test tests/*.test.ts
+
+(node:75) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# (node:82) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: session counts use the canonical local session date
+ok 1 - session counts use the canonical local session date
+  ---
+  duration_ms: 1.638842
+  type: 'test'
+  ...
+# Subtest: session counts refresh after reports are mutated in place
+ok 2 - session counts refresh after reports are mutated in place
+  ---
+  duration_ms: 0.22609
+  type: 'test'
+  ...
+# Subtest: daily work levels distinguish zero, one, and multiple sessions
+ok 3 - daily work levels distinguish zero, one, and multiple sessions
+  ---
+  duration_ms: 0.235534
+  type: 'test'
+  ...
+# Subtest: previous local date crosses month and year boundaries
+ok 4 - previous local date crosses month and year boundaries
+  ---
+  duration_ms: 0.433351
+  type: 'test'
+  ...
+# Subtest: current assignment excludes inactive and transferred source dogs
+ok 5 - current assignment excludes inactive and transferred source dogs
+  ---
+  duration_ms: 0.283556
+  type: 'test'
+  ...
+# Subtest: needs attention is limited to assigned pinned dogs not worked yesterday
+ok 6 - needs attention is limited to assigned pinned dogs not worked yesterday
+  ---
+  duration_ms: 0.197107
+  type: 'test'
+  ...
+# (node:83) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: summaries use observed ordinal distributions and a real median category
+ok 7 - summaries use observed ordinal distributions and a real median category
+  ---
+  duration_ms: 10.436544
+  type: 'test'
+  ...
+# Subtest: even samples use a lower observed middle category instead of a decimal mean
+ok 8 - even samples use a lower observed middle category instead of a decimal mean
+  ---
+  duration_ms: 0.274322
+  type: 'test'
+  ...
+# Subtest: timeline contains only explicitly logged observations and sorts chronologically
+ok 9 - timeline contains only explicitly logged observations and sorts chronologically
+  ---
+  duration_ms: 0.433532
+  type: 'test'
+  ...
+# Subtest: matching logs isolate the dog and stored category ID, never notes or labels
+ok 10 - matching logs isolate the dog and stored category ID, never notes or labels
+  ---
+  duration_ms: 0.228263
+  type: 'test'
+  ...
+# Subtest: explicit Absent is included, missing observations are excluded, and reports appear once
+ok 11 - explicit Absent is included, missing observations are excluded, and reports appear once
+  ---
+  duration_ms: 0.151988
+  type: 'test'
+  ...
+# Subtest: matching logs sort newest session first, then creation time, without mutating input
+ok 12 - matching logs sort newest session first, then creation time, without mutating input
+  ---
+  duration_ms: 0.21969
+  type: 'test'
+  ...
+# Subtest: empty inputs, unknown categories and another dog have empty results
+ok 13 - empty inputs, unknown categories and another dog have empty results
+  ---
+  duration_ms: 0.249325
+  type: 'test'
+  ...
+# Subtest: missing or retired template labels retain identifiable categories and matching logs
+ok 14 - missing or retired template labels retain identifiable categories and matching logs
+  ---
+  duration_ms: 0.297938
+  type: 'test'
+  ...
+# (node:84) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: actual single and repeatable recording never releases, graduates, or reactivates a dog
+ok 15 - actual single and repeatable recording never releases, graduates, or reactivates a dog
+  ---
+  duration_ms: 530.661019
+  type: 'test'
+  ...
+# Subtest: rename/remove/reload and undo retain original attempt labels, semantics, notes, and dates
+ok 16 - rename/remove/reload and undo retain original attempt labels, semantics, notes, and dates
+  ---
+  duration_ms: 23.567987
+  type: 'test'
+  ...
+# Subtest: legacy normalization never infers release provenance or a missing decision
+ok 17 - legacy normalization never infers release provenance or a missing decision
+  ---
+  duration_ms: 13.627959
+  type: 'test'
+  ...
+# Subtest: invalid selections and duplicate option names do not write decisions
+ok 18 - invalid selections and duplicate option names do not write decisions
+  ---
+  duration_ms: 9.804064
+  type: 'test'
+  ...
+# Subtest: rendered settings and charts show custom labels and exact counts
+ok 19 - rendered settings and charts show custom labels and exact counts
+  ---
+  duration_ms: 72.617517
+  type: 'test'
+  ...
+# Subtest: quota failure reports an applied attempt and retries the same event without duplicating it
+ok 20 - quota failure reports an applied attempt and retries the same event without duplicating it
+  ---
+  duration_ms: 22.586262
+  type: 'test'
+  ...
+# Subtest: single-decision selector keeps the recorded label after rename and permits an explicit new decision
+ok 21 - single-decision selector keeps the recorded label after rename and permits an explicit new decision
+  ---
+  duration_ms: 15.025439
+  type: 'test'
+  ...
+# (node:86) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: legacy missing choices backfill, but an explicitly empty list stays empty
+ok 22 - legacy missing choices backfill, but an explicitly empty list stays empty
+  ---
+  duration_ms: 1.574936
+  type: 'test'
+  ...
+# Subtest: custom and retired choices survive normalization and JSON round trips
+ok 23 - custom and retired choices survive normalization and JSON round trips
+  ---
+  duration_ms: 0.39307
+  type: 'test'
+  ...
+# Subtest: completion follows explicit option semantics; undo uses recorded semantics and date
+ok 24 - completion follows explicit option semantics; undo uses recorded semantics and date
+  ---
+  duration_ms: 0.296145
+  type: 'test'
+  ...
+# Subtest: per-milestone denominator counts current dogs once, includes excluded dogs, and separates retakes
+ok 25 - per-milestone denominator counts current dogs once, includes excluded dogs, and separates retakes
+  ---
+  duration_ms: 9.813988
+  type: 'test'
+  ...
+# Subtest: retired outcomes remain in charts; unknown/no decisions never become Placement Ready
+ok 26 - retired outcomes remain in charts; unknown/no decisions never become Placement Ready
+  ---
+  duration_ms: 0.352139
+  type: 'test'
+  ...
+# Subtest: renamed outcomes never relabel old results and mixed label versions count separately
+ok 27 - renamed outcomes never relabel old results and mixed label versions count separately
+  ---
+  duration_ms: 0.576076
+  type: 'test'
+  ...
+# (node:91) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: phase items are grouped in curriculum order rather than input order
+ok 28 - phase items are grouped in curriculum order rather than input order
+  ---
+  duration_ms: 1.601767
+  type: 'test'
+  ...
+# Subtest: valid selections are preserved across phases while stale ids are removed
+ok 29 - valid selections are preserved across phases while stale ids are removed
+  ---
+  duration_ms: 0.217137
+  type: 'test'
+  ...
+# (node:97) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: localSessionDate preserves the local calendar date near midnight
+ok 30 - localSessionDate preserves the local calendar date near midnight
+  ---
+  duration_ms: 1.059722
+  type: 'test'
+  ...
+# Subtest: legacy migration is deterministic at a UTC date boundary
+ok 31 - legacy migration is deterministic at a UTC date boundary
+  ---
+  duration_ms: 0.140311
+  type: 'test'
+  ...
+# Subtest: owner and shared legacy projections use the same canonical date
+ok 32 - owner and shared legacy projections use the same canonical date
+  ---
+  duration_ms: 0.103366
+  type: 'test'
+  ...
+# Subtest: future session dates are rejected while today and historical dates are accepted
+ok 33 - future session dates are rejected while today and historical dates are accepted
+  ---
+  duration_ms: 0.15337
+  type: 'test'
+  ...
+# Subtest: new-report future-date validation precedes photo and location side effects
+ok 34 - new-report future-date validation precedes photo and location side effects
+  ---
+  duration_ms: 13.665466
+  type: 'test'
+  ...
+# Subtest: stored lifecycle timestamps normalize to canonical date-only values
+ok 35 - stored lifecycle timestamps normalize to canonical date-only values
+  ---
+  duration_ms: 0.635354
+  type: 'test'
+  ...
+# Subtest: calendar date validation rejects malformed and impossible dates
+ok 36 - calendar date validation rejects malformed and impossible dates
+  ---
+  duration_ms: 0.277287
+  type: 'test'
+  ...
+# Subtest: date-only display uses local noon without shifting the calendar day
+ok 37 - date-only display uses local noon without shifting the calendar day
+  ---
+  duration_ms: 0.165559
+  type: 'test'
+  ...
+# (node:108) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: independent record additions merge; identical retry is a no-op; same record and deletion/edit require a choice
+ok 38 - independent record additions merge; identical retry is a no-op; same record and deletion/edit require a choice
+  ---
+  duration_ms: 3.017945
+  type: 'test'
+  ...
+# Subtest: offline save survives closing, reopening and newer server data without another edit
+ok 39 - offline save survives closing, reopening and newer server data without another edit
+  ---
+  duration_ms: 1.952864
+  type: 'test'
+  ...
+# Subtest: successful upload with lost acknowledgement and retry after relaunch never duplicates
+ok 40 - successful upload with lost acknowledgement and retry after relaunch never duplicates
+  ---
+  duration_ms: 0.627032
+  type: 'test'
+  ...
+# Subtest: session expiry retains pending data until same account signs back in
+ok 41 - session expiry retains pending data until same account signs back in
+  ---
+  duration_ms: 0.45924
+  type: 'test'
+  ...
+# Subtest: edits during an upload survive its acknowledgement and are included in the next immutable batch
+ok 42 - edits during an upload survive its acknowledgement and are included in the next immutable batch
+  ---
+  duration_ms: 6.648662
+  type: 'test'
+  ...
+# Subtest: conflicts survive relaunch and resolving one record preserves independent additions
+ok 43 - conflicts survive relaunch and resolving one record preserves independent additions
+  ---
+  duration_ms: 1.365823
+  type: 'test'
+  ...
+# Subtest: quota failure is never called a successful local save, but server acknowledgement can still preserve the edit
+ok 44 - quota failure is never called a successful local save, but server acknowledgement can still preserve the edit
+  ---
+  duration_ms: 0.443747
+  type: 'test'
+  ...
+# Subtest: deleting a dog cannot hide a new log added by another device
+ok 45 - deleting a dog cannot hide a new log added by another device
+  ---
+  duration_ms: 0.400562
+  type: 'test'
+  ...
+# Subtest: an asynchronous form completion during conflict recovery is retained when choosing a version
+ok 46 - an asynchronous form completion during conflict recovery is retained when choosing a version
+  ---
+  duration_ms: 2.024872
+  type: 'test'
+  ...
+# Subtest: edited parent versus remote deletion cannot delete the parent of a retained new log
+ok 47 - edited parent versus remote deletion cannot delete the parent of a retained new log
+  ---
+  duration_ms: 0.589096
+  type: 'test'
+  ...
+# Subtest: report-only milestone and location references retain concurrently deleted definitions
+ok 48 - report-only milestone and location references retain concurrently deleted definitions
+  ---
+  duration_ms: 0.440772
+  type: 'test'
+  ...
+# Subtest: concurrent folder moves cannot silently produce a cycle; recovery retains unrelated new folders
+ok 49 - concurrent folder moves cannot silently produce a cycle; recovery retains unrelated new folders
+  ---
+  duration_ms: 0.415134
+  type: 'test'
+  ...
+# Subtest: resolving a folder cycle preserves a separately chosen folder name
+ok 50 - resolving a folder cycle preserves a separately chosen folder name
+  ---
+  duration_ms: 0.706381
+  type: 'test'
+  ...
+# Subtest: two devices cannot create duplicate progress records for the same dog and skill
+ok 51 - two devices cannot create duplicate progress records for the same dog and skill
+  ---
+  duration_ms: 0.211247
+  type: 'test'
+  ...
+# (node:138) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# WebSocket server error: Port 24678 is already in use
+# Subtest: real report save: offline acknowledgement is local only; rehydrate preserves and uploads after relaunch
+ok 52 - real report save: offline acknowledgement is local only; rehydrate preserves and uploads after relaunch
+  ---
+  duration_ms: 561.983268
+  type: 'test'
+  ...
+# Subtest: real report form retry after quota failure uses the same report ID
+ok 53 - real report form retry after quota failure uses the same report ID
+  ---
+  duration_ms: 19.148646
+  type: 'test'
+  ...
+# Subtest: lost server acknowledgement and expired session both recover without another log entry
+ok 54 - lost server acknowledgement and expired session both recover without another log entry
+  ---
+  duration_ms: 14.424186
+  type: 'test'
+  ...
+# Subtest: another account cannot inherit Abby pending edits
+ok 55 - another account cannot inherit Abby pending edits
+  ---
+  duration_ms: 10.517265
+  type: 'test'
+  ...
+# Subtest: legacy cache differences are retained for recovery instead of overwritten by successful GET
+ok 56 - legacy cache differences are retained for recovery instead of overwritten by successful GET
+  ---
+  duration_ms: 18.829706
+  type: 'test'
+  ...
+# Subtest: editing the form after failed persistence updates privacy and skills on the same log
+ok 57 - editing the form after failed persistence updates privacy and skills on the same log
+  ---
+  duration_ms: 20.869537
+  type: 'test'
+  ...
+# Subtest: a token replaced by another tab cannot redirect pending data into that account
+ok 58 - a token replaced by another tab cannot redirect pending data into that account
+  ---
+  duration_ms: 7.744718
+  type: 'test'
+  ...
+# Subtest: overlapping startup hydrations cannot strand an obsolete tab lock
+ok 59 - overlapping startup hydrations cannot strand an obsolete tab lock
+  ---
+  duration_ms: 15.880954
+  type: 'test'
+  ...
+# (node:148) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# WebSocket server error: Port 24678 is already in use
+# Subtest: actual Worker rejects missing/stale revisions and issues unique revisions for accepted writes
+ok 60 - actual Worker rejects missing/stale revisions and issues unique revisions for accepted writes
+  ---
+  duration_ms: 265.597042
+  type: 'test'
+  ...
+# (node:155) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: trainer-since values use valid month precision
+ok 61 - trainer-since values use valid month precision
+  ---
+  duration_ms: 0.686702
+  type: 'test'
+  ...
+# Subtest: the current local month is derived without a UTC boundary shift
+ok 62 - the current local month is derived without a UTC boundary shift
+  ---
+  duration_ms: 0.26615
+  type: 'test'
+  ...
+# Subtest: account creation timestamps backfill to their calendar month
+ok 63 - account creation timestamps backfill to their calendar month
+  ---
+  duration_ms: 0.091377
+  type: 'test'
+  ...
+# Subtest: trainer-since months format without UTC boundary shifts
+ok 64 - trainer-since months format without UTC boundary shifts
+  ---
+  duration_ms: 16.227426
+  type: 'test'
+  ...
+1..64
+# tests 64
+# suites 0
+# pass 64
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1190.351028

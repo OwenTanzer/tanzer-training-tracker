@@ -1,0 +1,49 @@
+{
+  "node": "v22.23.3",
+  "baseline": "f05a30ff8425774e9432158a60e803fcf42873a5",
+  "buildApiBaseUrl": "https://abbys-dog-chej-api.otmooper12.workers.dev",
+  "stages": [
+    {
+      "stage": "npm-ci",
+      "command": "npm ci",
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "stage": "unit-tests",
+      "command": "npm test",
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "stage": "lint",
+      "command": "npm run lint",
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "stage": "production-build",
+      "command": "npm run build",
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "stage": "worker-ci",
+      "command": "npm --prefix worker ci",
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "stage": "worker-typecheck",
+      "command": "npm --prefix worker run typecheck",
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "stage": "diff-check",
+      "command": "git diff --check",
+      "exitCode": 0,
+      "status": "passed"
+    }
+  ]
+}

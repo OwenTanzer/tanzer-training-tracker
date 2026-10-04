@@ -9,6 +9,7 @@ import {
 } from '../../shared/sessionDate';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { distractionLabel } from '../lib/distractionAnalytics';
 import { DistractionAnalytics } from '../components/DistractionAnalytics';
 import { MoveDialog } from '../components/MoveDialog';
 import { DailyWorkBadge } from '../components/DailyWorkStatus';
@@ -486,6 +487,106 @@ export function DogProfile() {
 
   if (!dog) {
     return <p className="p-4 text-gray-500">Dog not found.</p>;
+  }
+
+  function renderReport(r: TrainingReport) {
+    if (!dog) return null;
+
+    const location = locations.find((l) => l.id === r.locationId);
+    if (editingReportId === r.id) {
+      return (
+        <li
+          key={r.id}
+          className="rounded-lg border border-sky-300 dark:border-sky-700 p-3"
+        >
+          <EditReportForm
+            report={r}
+            currentPhase={dog.currentPhase}
+            locations={locations}
+            distractionTemplates={distractionTemplates}
+            onCancel={() => setEditingReportId(null)}
+            onSaved={() => setEditingReportId(null)}
+          />
+        </li>
+      );
+    }
+    return (
+      <li
+        key={r.id}
+        className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-1"
+      >
+        <div className="flex items-center justify-between text-sm">
+          <span className="font-medium">
+            {r.phase} · {new Date(`${r.sessionDate}T12:00:00`).toLocaleDateString()}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => toggleReportRedFlag(r.id)}
+              aria-pressed={r.redFlag}
+              title="Toggle red flag"
+              className={`flex h-7 w-7 items-center justify-center rounded-full text-sm transition-all duration-150 active:scale-90 ${
+                r.redFlag
+                  ? 'bg-red-100 ring-1 ring-red-400 dark:bg-red-950'
+                  : 'bg-gray-100 opacity-40 grayscale hover:opacity-70 dark:bg-gray-800'
+              }`}
+            >
+              🚩
+            </button>
+            <button
+              onClick={() => setEditingReportId(r.id)}
+              className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+              title="Edit log"
+            >
+              <PencilIcon />
+            </button>
+            <button
+              onClick={() => handleDeleteReport(r.id)}
+              className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950"
+              title="Delete log"
+            >
+              <TrashIcon />
+            </button>
+          </div>
+        </div>
+        {location && (
+          <p className="text-xs text-gray-500">📍 {location.name}</p>
+        )}
+        {r.picture && (
+          <img
+            src={r.picture}
+            alt="Training log attachment"
+            className="h-24 w-24 rounded-md object-cover"
+          />
+        )}
+        <p className="text-sm text-gray-700 dark:text-gray-300">{r.notes}</p>
+        {r.skillIds.length > 0 && (
+          <p className="text-xs text-gray-500">
+            Skills worked on:{' '}
+            {r.skillIds
+              .map((id) => allChecklistItems.find((i) => i.id === id)?.title)
+              .filter(Boolean)
+              .join(', ')}
+          </p>
+        )}
+        {r.milestoneIds.length > 0 && (
+          <p className="text-xs text-gray-500">
+            Milestones worked on:{' '}
+            {r.milestoneIds
+              .map((id) => allMilestoneTemplates.find((m) => m.id === id)?.title)
+              .filter(Boolean)
+              .join(', ')}
+          </p>
+        )}
+        {r.distractions.length > 0 && (
+          <p className="text-xs text-gray-500">
+            Distractions:{' '}
+            {r.distractions
+              .map((d) => `${distractionLabel(distractionTemplates, d.distractionId)} (${d.severity})`)
+              .join(', ')}
+          </p>
+        )}
+      </li>
+    );
   }
 
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1118,9 +1219,13 @@ export function DogProfile() {
       </section>
 
       <DistractionAnalytics
+        key={dog.id}
         dogId={dog.id}
         reports={allReports}
         templates={distractionTemplates}
+        locations={locations}
+        renderReport={renderReport}
+        onLeaveDetails={() => setEditingReportId(null)}
       />
 
       <section className="space-y-2">
@@ -1156,109 +1261,7 @@ export function DogProfile() {
           />
         </div>
         <ul className="space-y-2">
-          {reports.map((r) => {
-            const location = locations.find((l) => l.id === r.locationId);
-            if (editingReportId === r.id) {
-              return (
-                <li
-                  key={r.id}
-                  className="rounded-lg border border-sky-300 dark:border-sky-700 p-3"
-                >
-                  <EditReportForm
-                    report={r}
-                    currentPhase={dog.currentPhase}
-                    locations={locations}
-                    distractionTemplates={distractionTemplates}
-                    onCancel={() => setEditingReportId(null)}
-                    onSaved={() => setEditingReportId(null)}
-                  />
-                </li>
-              );
-            }
-            return (
-              <li
-                key={r.id}
-                className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-1"
-              >
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium">
-                    {r.phase} · {new Date(`${r.sessionDate}T12:00:00`).toLocaleDateString()}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => toggleReportRedFlag(r.id)}
-                      aria-pressed={r.redFlag}
-                      title="Toggle red flag"
-                      className={`flex h-7 w-7 items-center justify-center rounded-full text-sm transition-all duration-150 active:scale-90 ${
-                        r.redFlag
-                          ? 'bg-red-100 ring-1 ring-red-400 dark:bg-red-950'
-                          : 'bg-gray-100 opacity-40 grayscale hover:opacity-70 dark:bg-gray-800'
-                      }`}
-                    >
-                      🚩
-                    </button>
-                    <button
-                      onClick={() => setEditingReportId(r.id)}
-                      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-                      title="Edit log"
-                    >
-                      <PencilIcon />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteReport(r.id)}
-                      className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950"
-                      title="Delete log"
-                    >
-                      <TrashIcon />
-                    </button>
-                  </div>
-                </div>
-                {location && (
-                  <p className="text-xs text-gray-500">📍 {location.name}</p>
-                )}
-                {r.picture && (
-                  <img
-                    src={r.picture}
-                    alt="Training log attachment"
-                    className="h-24 w-24 rounded-md object-cover"
-                  />
-                )}
-                <p className="text-sm text-gray-700 dark:text-gray-300">{r.notes}</p>
-                {r.skillIds.length > 0 && (
-                  <p className="text-xs text-gray-500">
-                    Skills worked on:{' '}
-                    {r.skillIds
-                      .map((id) => allChecklistItems.find((i) => i.id === id)?.title)
-                      .filter(Boolean)
-                      .join(', ')}
-                  </p>
-                )}
-                {r.milestoneIds.length > 0 && (
-                  <p className="text-xs text-gray-500">
-                    Milestones worked on:{' '}
-                    {r.milestoneIds
-                      .map((id) => allMilestoneTemplates.find((m) => m.id === id)?.title)
-                      .filter(Boolean)
-                      .join(', ')}
-                  </p>
-                )}
-                {r.distractions.length > 0 && (
-                  <p className="text-xs text-gray-500">
-                    Distractions:{' '}
-                    {r.distractions
-                      .map((d) => {
-                        const title = distractionTemplates.find(
-                          (t) => t.id === d.distractionId,
-                        )?.title;
-                        return title ? `${title} (${d.severity})` : null;
-                      })
-                      .filter(Boolean)
-                      .join(', ')}
-                  </p>
-                )}
-              </li>
-            );
-          })}
+          {reports.map(renderReport)}
           {reports.length === 0 && (
             <p className="text-sm text-gray-400">No training logs match these filters.</p>
           )}

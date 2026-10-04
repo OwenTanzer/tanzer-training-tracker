@@ -1,0 +1,12 @@
+(node:253) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> tanzer-training-tracker@0.0.0 lint
+> oxlint
+
+(node:266) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+src/App.tsx:88:10: warning react-hooks(exhaustive-deps): React Hook useEffect has a missing dependency: 'session' help: Either include it or remove the dependency array.
+src/components/GuideDogIllustration.tsx:14:14: warning react(only-export-components): Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components.
+src/components/GuideDogIllustration.tsx:49:17: warning react(only-export-components): Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components.

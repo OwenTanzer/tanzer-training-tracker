@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "checks": [
+    "390px: one-tap opening; selected category; count; session-date order; Absent; notes/context; dog and shared-overlay isolation; no horizontal overflow",
+    "Full existing details, visible Back controls, repeated category selection and browser Back from detail/list",
+    "Close, Escape, different/repeated selections and retired category labels in summary/list/details",
+    "Empty state; client-side navigation to another dog; stale detail URL cannot expose another dog’s log",
+    "320px matching-list layout has no horizontal overflow",
+    "No page errors, API writes or external/production requests"
+  ],
+  "errors": [],
+  "writes": [],
+  "external": []
+}
