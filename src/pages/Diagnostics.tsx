@@ -35,7 +35,7 @@ export function Diagnostics() {
     if (!legacy) return;
     setImporting(true);
     setImportError(null);
-    importLegacyDatabase(legacy)
+    importLegacyDatabase()
       .then(() => setLegacy(null))
       .catch((err: unknown) => {
         setImportError(err instanceof Error ? err.message : "Couldn't import that data.");

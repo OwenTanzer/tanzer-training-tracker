@@ -97,7 +97,7 @@ function App() {
     if (!legacyImport) return;
     setImporting(true);
     setImportError(null);
-    importLegacyDatabase(legacyImport)
+    importLegacyDatabase()
       .then(() => setLegacyImport(null))
       .catch((err: unknown) => {
         setImportError(err instanceof Error ? err.message : "Couldn't import that data.");
