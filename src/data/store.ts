@@ -278,9 +278,15 @@ export function getImportableLegacyDatabase(): Database | null {
 // plain dismiss/"not now", which should just hide the prompt for now without
 // touching this.
 export function declineLegacyImport(): void {
-  clearLegacyDatabase();
-  markLegacyDataClaimed();
+  removeLegacyAfterDecision();
   notifyListeners();
+}
+
+function removeLegacyAfterDecision(): void {
+  clearLegacyDatabase();
+  // With the source gone, the marker is redundant. A quota failure here must
+  // not falsely report that a confirmed removal or import failed.
+  try { markLegacyDataClaimed(); } catch { /* Source already removed. */ }
 }
 
 // Reactive (unlike calling getImportableLegacyDatabase() directly in a render
@@ -349,8 +355,7 @@ export async function importLegacyDatabase(): Promise<void> {
   await retrySync();
   if (myGeneration !== generation || syncStatus !== 'synced') throw new Error('Import is pending. Keep the original data until synchronization completes.');
   if (peekLegacyDatabaseRaw() !== raw) throw new Error('Pre-account data changed during import. Keep the original data.');
-  clearLegacyDatabase();
-  markLegacyDataClaimed();
+  removeLegacyAfterDecision();
 }
 
 export function resetLocalStore(): void {

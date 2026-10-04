@@ -3,13 +3,13 @@ import { after, before, test } from 'node:test';
 import { createServer } from 'vite';
 import type { Database } from '../src/data/db.ts';
 const storage = new Map<string, string>();
-let failStorage = false, failLegacyRemoval = false, failLegacyRead = false;
+let failStorage = false, failLegacyRemoval = false, failLegacyRead = false, failLegacyClaim = false;
 let offline = false, offlineWrite = false, lostAck = false, unauthorized = false;
 let remote: Database, revision = 0;
 const originalFetch = globalThis.fetch;
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
   getItem: (k: string) => { if (failLegacyRead && k === 'abbys-dog-chej:db:v1') throw new Error('Read denied'); return storage.get(k) ?? null; },
-  setItem: (k: string, v: string) => { if (failStorage && (k.includes('outbox') || k.includes('server-cache'))) throw new Error('Quota'); storage.set(k, v); },
+  setItem: (k: string, v: string) => { if (failLegacyClaim && k === 'abbys-dog-chej:db:v1:claimed') throw new Error('Claim denied'); if (failStorage && (k.includes('outbox') || k.includes('server-cache'))) throw new Error('Quota'); storage.set(k, v); },
   removeItem: (k: string) => { if (failLegacyRemoval && k === 'abbys-dog-chej:db:v1') throw new Error('Remove denied'); storage.delete(k); },
 } });
 let vite: Awaited<ReturnType<typeof createServer>>;
@@ -35,7 +35,7 @@ before(async () => {
 });
 after(async () => { store.resetLocalStore(); await vite.close(); globalThis.fetch = originalFetch; });
 async function setup() {
-  store.resetLocalStore(); storage.clear(); offline = offlineWrite = lostAck = unauthorized = failStorage = failLegacyRemoval = failLegacyRead = false;
+  store.resetLocalStore(); storage.clear(); offline = offlineWrite = lostAck = unauthorized = failStorage = failLegacyRemoval = failLegacyRead = failLegacyClaim = false;
   remote = data.emptyDatabase(); revision = 0;
   await store.hydrateFromServer('abby');
   const dog = store.createDog('Hubble', 'folder'); await store.retrySync();
@@ -227,6 +227,17 @@ test('failed explicit decline keeps pre-account data unclaimed for a retry', () 
   assert.equal(storage.get('abbys-dog-chej:db:v1'), original);
   assert.equal(storage.has('abbys-dog-chej:db:v1:claimed'), false);
   failLegacyRemoval = false;
+});
+
+test('successful explicit decline does not report a redundant marker write failure', () => {
+  store.resetLocalStore(); storage.clear();
+  failLegacyRemoval = false; failLegacyRead = false; failLegacyClaim = false;
+  seedPreAccountData();
+  failLegacyClaim = true;
+  assert.doesNotThrow(() => store.declineLegacyImport());
+  assert.equal(storage.has('abbys-dog-chej:db:v1'), false);
+  assert.equal(storage.has('abbys-dog-chej:db:v1:claimed'), false);
+  failLegacyClaim = false;
 });
 
 test('editing the form after failed persistence updates privacy and skills on the same log', async () => {
