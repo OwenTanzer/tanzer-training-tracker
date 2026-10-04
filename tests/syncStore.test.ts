@@ -85,6 +85,27 @@ test('legacy cache differences are retained for recovery instead of overwritten 
   assert.ok(remote.reports.some(r => r.id === 'old-cache-log'));
 });
 
+test('hydrating a populated account preserves an unclaimed pre-account report', async () => {
+  store.resetLocalStore(); storage.clear();
+  offline = lostAck = unauthorized = failStorage = false;
+  const legacy = data.emptyDatabase();
+  legacy.dogs = [{ id: 'legacy-dog', name: 'Legacy dog' } as Database['dogs'][number]];
+  legacy.reports = [{ id: 'legacy-only-report', dogId: 'legacy-dog', notes: 'Only local copy' } as Database['reports'][number]];
+  const original = JSON.stringify(legacy);
+  storage.set('abbys-dog-chej:db:v1', original);
+  remote = data.emptyDatabase();
+  remote.dogs = [{ id: 'account-dog', name: 'Account dog' } as Database['dogs'][number]];
+  revision = 0;
+
+  await store.hydrateFromServer('other');
+  await store.retrySync();
+
+  assert.equal(storage.get('abbys-dog-chej:db:v1'), original);
+  assert.equal(storage.has('abbys-dog-chej:db:v1:claimed'), false);
+  assert.equal(remote.reports.length, 0);
+  assert.equal(store.getSyncState().blob.reports.length, 0);
+});
+
 test('editing the form after failed persistence updates privacy and skills on the same log', async () => {
   const dog = await setup(); const skill = store.getSyncState().blob.checklistItems[0];
   failStorage = true; offline = true;
