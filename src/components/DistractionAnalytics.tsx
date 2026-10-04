@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router-dom';
 import { calendarDateAtLocalNoon, localSessionDate } from '../../shared/sessionDate';
 import {
   createDogEvent,
@@ -35,6 +35,17 @@ const SEVERITY_COLORS: Record<DistractionSeverity, string> = {
   Moderate: '#f59e0b',
   Severe: '#ef4444',
 };
+
+type DistractionEntry = {
+  kind: 'category' | 'detail';
+  dogId: string;
+  categoryId: string;
+  categoryKey?: string;
+};
+
+// Browser history cannot remove an entry in the middle of the stack. When a
+// detail is closed, skip its dismissed category on later Back/Forward visits.
+const dismissedCategoryKeys = new Set<string>();
 
 function displayDate(date: string): string {
   return calendarDateAtLocalNoon(date).toLocaleDateString();
@@ -186,25 +197,50 @@ export function DistractionAnalytics({
   // URL state gives browser/phone Back the same list → summary behavior as
   // the visible controls, without changing the application's routes or store.
   const [searchParams, setSearchParams] = useSearchParams();
+  const routeLocation = useLocation();
+  const navigate = useNavigate();
+  const navigationType = useNavigationType();
+  const entry = (routeLocation.state as { distractionEntry?: DistractionEntry } | null)?.distractionEntry;
   const categoryId = searchParams.get('distraction');
   const reportId = searchParams.get('distractionLog');
+  const historyIndex = window.history.state?.idx as number | undefined;
+  const previousHistoryIndex = useRef(historyIndex);
+  useEffect(() => {
+    const previous = previousHistoryIndex.current;
+    previousHistoryIndex.current = historyIndex;
+    if (categoryId !== null && navigationType === 'POP' && dismissedCategoryKeys.has(routeLocation.key)) {
+      navigate(typeof previous === 'number' && typeof historyIndex === 'number' && historyIndex > previous ? 1 : -1);
+    }
+  }, [categoryId, historyIndex, routeLocation.key, navigate, navigationType]);
   const matchingReports = useMemo(
     () => categoryId === null ? [] : reportsForDistraction(dogReports, dogId, categoryId),
     [dogReports, dogId, categoryId],
   );
   const detailReport = matchingReports.find((report) => report.id === reportId);
+  const detailVisible = categoryId !== null && detailReport !== undefined;
+  const previousDetail = useRef({ dogId, categoryId, reportId, detailVisible });
+  useEffect(() => {
+    const previous = previousDetail.current;
+    if (previous.reportId && (
+      previous.reportId !== reportId || previous.categoryId !== categoryId ||
+      previous.dogId !== dogId || (previous.detailVisible && !detailVisible)
+    )) {
+      onLeaveDetails();
+    }
+    previousDetail.current = { dogId, categoryId, reportId, detailVisible };
+  }, [dogId, categoryId, reportId, detailVisible, onLeaveDetails]);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     const dialog = dialogRef.current;
-    if (categoryId !== null) {
+    if (categoryId !== null && !dismissedCategoryKeys.has(routeLocation.key)) {
       if (!dialog?.open) dialog?.showModal();
       if (dialog) dialog.scrollTop = 0;
       headingRef.current?.focus();
     } else if (dialog?.open) {
       dialog.close();
     }
-  }, [categoryId, reportId]);
+  }, [categoryId, reportId, routeLocation.key]);
 
   function openCategory(id: string) {
     onLeaveDetails();
@@ -212,22 +248,32 @@ export function DistractionAnalytics({
     const next = new URLSearchParams(searchParams);
     next.set('distraction', id);
     next.delete('distractionLog');
-    setSearchParams(next);
+    setSearchParams(next, { state: { distractionEntry: { kind: 'category', dogId, categoryId: id } satisfies DistractionEntry } });
   }
 
   function closeLogs() {
     onLeaveDetails();
+    if (entry?.kind === 'category' && entry.dogId === dogId && entry.categoryId === categoryId) {
+      dismissedCategoryKeys.add(routeLocation.key);
+    }
+    if (reportId && entry?.kind === 'detail' && entry.dogId === dogId && entry.categoryId === categoryId && entry.categoryKey) {
+      dismissedCategoryKeys.add(entry.categoryKey);
+    }
     const next = new URLSearchParams(searchParams);
     next.delete('distraction');
     next.delete('distractionLog');
-    setSearchParams(next, { replace: true });
+    setSearchParams(next, { replace: true, state: null });
   }
 
   function backToMatches() {
     onLeaveDetails();
+    if (entry?.kind === 'detail' && entry.dogId === dogId && entry.categoryId === categoryId && entry.categoryKey && !dismissedCategoryKeys.has(entry.categoryKey)) {
+      navigate(-1);
+      return;
+    }
     const next = new URLSearchParams(searchParams);
     next.delete('distractionLog');
-    setSearchParams(next, { replace: true });
+    setSearchParams(next, { replace: true, state: null });
   }
 
   const [newEventDate, setNewEventDate] = useState(localSessionDate);
@@ -381,7 +427,7 @@ export function DistractionAnalytics({
                     onLeaveDetails();
                     const next = new URLSearchParams(searchParams);
                     next.set('distractionLog', report.id);
-                    setSearchParams(next);
+                    setSearchParams(next, { state: { distractionEntry: { kind: 'detail', dogId, categoryId: categoryId!, categoryKey: entry?.kind === 'category' && entry.dogId === dogId && entry.categoryId === categoryId ? routeLocation.key : undefined } satisfies DistractionEntry } });
                   }} className="min-h-11 rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-700">
                     Open full log details
                   </button>
