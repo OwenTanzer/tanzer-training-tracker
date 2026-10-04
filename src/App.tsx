@@ -97,7 +97,7 @@ function App() {
     if (!legacyImport) return;
     setImporting(true);
     setImportError(null);
-    importLegacyDatabase(legacyImport)
+    importLegacyDatabase()
       .then(() => setLegacyImport(null))
       .catch((err: unknown) => {
         setImportError(err instanceof Error ? err.message : "Couldn't import that data.");
@@ -122,8 +122,12 @@ function App() {
       "Don't import this data? This can't be undone — this device won't offer to import it again.",
     );
     if (!confirmed) return;
-    declineLegacyImport();
-    setLegacyImport(null);
+    try {
+      declineLegacyImport();
+      setLegacyImport(null);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Couldn't remove the pre-account data.");
+    }
   }
 
   if (!splashDone) {

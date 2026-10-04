@@ -380,11 +380,16 @@ const LEGACY_CLAIMED_KEY = 'abbys-dog-chej:db:v1:claimed';
 // for the one-time import prompt, not to adopt it as the active database.
 export function peekLegacyDatabase(): Database | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = peekLegacyDatabaseRaw();
     return raw ? normalizeDatabase(JSON.parse(raw)) : null;
   } catch {
     return null;
   }
+}
+
+export function peekLegacyDatabaseRaw(): string | null {
+  try { return localStorage.getItem(STORAGE_KEY); }
+  catch { return null; }
 }
 
 export function hasLegacyContent(db: Database): boolean {
@@ -404,13 +409,11 @@ export function markLegacyDataClaimed(): void {
   localStorage.setItem(LEGACY_CLAIMED_KEY, 'true');
 }
 
-// The legacy blob embeds photos as base64 data: URLs (often multiple MB), so
-// it's typically the single largest thing in localStorage. Once it's no
-// longer reachable through the import prompt — imported, explicitly
-// declined, or superseded by an account that already has its own real data —
-// it's pure dead weight sitting between the device and its storage quota.
+// Only a verified import or explicit confirmed decline may remove the
+// pre-account blob. A populated account alone says nothing about its owner.
 export function clearLegacyDatabase(): void {
   localStorage.removeItem(STORAGE_KEY);
+  if (localStorage.getItem(STORAGE_KEY) !== null) throw new Error('Pre-account data could not be removed from this device.');
 }
 
 // One atomic write contains both the confirmed base and pending edits. Never

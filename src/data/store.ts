@@ -36,6 +36,7 @@ import {
   markLegacyDataClaimed,
   normalizeDatabase,
   peekLegacyDatabase,
+  peekLegacyDatabaseRaw,
   saveServerCache,
   type Database,
 } from './db';
@@ -166,7 +167,6 @@ export async function hydrateFromServer(instructorId: string, token: string | nu
   hydrated = true;
   if (remote) engine.reconcile({ blob: documentOf(serverBlob!), updatedAt: remote.updatedAt });
   else { engine.status = 'pending'; engine.persist(); syncStatus = engine.status; }
-  pruneUnreachableLegacyData();
   notifyListeners();
   if (!engine.conflicts.length && !equal(engine.base, engine.local)) void engine.flush();
 }
@@ -278,23 +278,15 @@ export function getImportableLegacyDatabase(): Database | null {
 // plain dismiss/"not now", which should just hide the prompt for now without
 // touching this.
 export function declineLegacyImport(): void {
-  markLegacyDataClaimed();
-  clearLegacyDatabase();
+  removeLegacyAfterDecision();
   notifyListeners();
 }
 
-// If this account already has its own real data, getImportableLegacyDatabase()
-// will never offer this device's pre-account blob for import (it only offers
-// import into an empty account) — so a device that reached "has legacy data"
-// and "already has a populated account" without ever explicitly importing or
-// declining (e.g. the account was populated on a different device, or before
-// this cleanup existed) would otherwise keep that now-unreachable blob
-// forever, quietly eating into the device's storage quota.
-function pruneUnreachableLegacyData(): void {
-  if (isLegacyDataClaimed()) return;
-  if (!hasLegacyContent(db)) return;
-  markLegacyDataClaimed();
+function removeLegacyAfterDecision(): void {
   clearLegacyDatabase();
+  // With the source gone, the marker is redundant. A quota failure here must
+  // not falsely report that a confirmed removal or import failed.
+  try { markLegacyDataClaimed(); } catch { /* Source already removed. */ }
 }
 
 // Reactive (unlike calling getImportableLegacyDatabase() directly in a render
@@ -344,20 +336,26 @@ async function migratePhotosToServer(source: Database): Promise<Database> {
 
 // Import joins the durable queue. Claim the legacy copy only after server
 // acknowledgement; preserve it while offline or awaiting conflict recovery.
-export async function importLegacyDatabase(legacy: Database): Promise<void> {
+export async function importLegacyDatabase(): Promise<void> {
   const myGeneration = generation;
   await retrySync();
   if (myGeneration !== generation || syncStatus !== 'synced') throw new Error('Finish syncing existing changes before importing.');
+  // Read the source from this device at import time. A caller must not be able
+  // to assign an arbitrary document to the signed-in account through import.
+  const raw = peekLegacyDatabaseRaw();
+  const legacy = getImportableLegacyDatabase();
+  if (!raw || !legacy) throw new Error('Pre-account data is unavailable or this account already has data.');
   const before = copy(db);
   const migrated = await migratePhotosToServer(legacy);
   if (myGeneration !== generation) throw new Error('Account changed. Sign in to the original account before importing.');
   if (!equal(before, db)) throw new Error('Data changed during import. Try importing again.');
+  if (peekLegacyDatabaseRaw() !== raw) throw new Error('Pre-account data changed during import. Try importing again.');
   db = migrated;
   notify();
   await retrySync();
   if (myGeneration !== generation || syncStatus !== 'synced') throw new Error('Import is pending. Keep the original data until synchronization completes.');
-  markLegacyDataClaimed();
-  clearLegacyDatabase();
+  if (peekLegacyDatabaseRaw() !== raw) throw new Error('Pre-account data changed during import. Keep the original data.');
+  removeLegacyAfterDecision();
 }
 
 export function resetLocalStore(): void {

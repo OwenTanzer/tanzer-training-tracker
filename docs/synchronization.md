@@ -44,6 +44,15 @@ Old caches do not distinguish pending data from confirmed snapshots. On first
 upgrade, preserve their content and reconcile conservatively, without inferring
 deletions from missing records. Do not clear browser data to bypass recovery.
 
+The older pre-account browser key is separate from every instructor's outbox and
+cache. A populated account does not prove that the legacy content belongs to it
+or was imported, so hydration and account changes leave that key untouched.
+The existing import prompt is available only for an empty account. Import reads
+the current on-device source and removes it only after the import is confirmed
+by the server; an interrupted import retains it. A deliberately confirmed
+decline remains the other explicit removal path. Recovery or export for legacy
+content alongside a populated account requires a separate ownership decision.
+
 Storage failure remains a real failure: show that changes are not saved on this
 device, retain memory/form state, and allow server delivery. Clearing browser data,
 reinstalling the app, or OS eviction can remove local-only data; only a server

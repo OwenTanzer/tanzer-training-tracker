@@ -35,7 +35,7 @@ export function Diagnostics() {
     if (!legacy) return;
     setImporting(true);
     setImportError(null);
-    importLegacyDatabase(legacy)
+    importLegacyDatabase()
       .then(() => setLegacy(null))
       .catch((err: unknown) => {
         setImportError(err instanceof Error ? err.message : "Couldn't import that data.");
@@ -48,8 +48,12 @@ export function Diagnostics() {
       "Don't import this data? This can't be undone — this device won't offer to import it again.",
     );
     if (!confirmed) return;
-    declineLegacyImport();
-    setLegacy(null);
+    try {
+      declineLegacyImport();
+      setLegacy(null);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Couldn't remove the pre-account data.");
+    }
   }
 
   function handleCopy() {
