@@ -160,6 +160,10 @@ function NewReportForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (initial.blocked) {
+      setSubmitError('The existing draft could not be read. Keep this browser data and recover that draft before saving a new log.');
+      return;
+    }
     if (inFlight.current) return;
     if (staleDraft || (draftOwner.instructorId && isDraftStale(draftOwner.instructorId, dogId!))) { setStaleDraft(true); return; }
     setSubmitError(null);
@@ -484,7 +488,7 @@ function NewReportForm() {
 
         <button
           type="submit"
-          disabled={saving || staleDraft}
+          disabled={saving || staleDraft || initial.blocked}
           className="rounded-md bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600 disabled:opacity-50"
         >
           {saving ? 'Saving…' : 'Save Log'}
