@@ -13,7 +13,7 @@ import {
   resetLocalStore,
   seedDefaultTemplatesIfEmpty,
   useHydrated,
-  useSyncStatus,
+  useSyncConflicts,
 } from './data/store';
 import type { Database } from './data/db';
 import { AccountSettings } from './pages/AccountSettings';
@@ -43,7 +43,7 @@ function App() {
   );
   const session = useSession();
   const hydrated = useHydrated();
-  const syncStatus = useSyncStatus();
+  const syncConflicts = useSyncConflicts();
   const [hydrateError, setHydrateError] = useState<string | null>(null);
   const [legacyImport, setLegacyImport] = useState<Database | null>(null);
   const [importing, setImporting] = useState(false);
@@ -202,7 +202,7 @@ function App() {
     );
   }
 
-  if (syncStatus === 'conflict') return <SyncRecovery />;
+  if (syncConflicts.length) return <SyncRecovery />;
 
   if (!landingDone) {
     return (
