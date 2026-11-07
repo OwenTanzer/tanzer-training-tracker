@@ -84,6 +84,8 @@ let engine: SyncEngine | null = null;
 // Retain failed local writes across in-page expiry/logout, scoped to their
 // instructor. These snapshots are volatile, never evidence of device storage.
 const memoryOutboxes = new Map<string, Envelope>();
+// The durable snapshot observed before this page's first failed write.
+const memoryOutboxBases = new Map<string, Envelope | null>();
 export function hasMemorySyncRecovery() { return memoryOutboxes.size > 0; }
 let syncConflicts: Conflict[] = [];
 const listeners = new Set<() => void>();
@@ -143,7 +145,20 @@ export async function hydrateFromServer(instructorId: string, token: string | nu
   if (!acquired) throw new Error('This account is open in another tab. Finish or back up unfinished work there before closing it, then retry here. Closing can lose work held only in that page.');
   currentInstructorId = instructorId;
   storeToken = token;
-  const pending = inMemory ?? loadOutbox(instructorId);
+  const durable = loadOutbox(instructorId);
+  const observed = memoryOutboxBases.get(instructorId);
+  let pending = inMemory ?? durable;
+  if (inMemory && durable && !equal(inMemory, durable) && !equal(observed, durable)) {
+    // Do not let an old page replace another owner's newer unsynced outbox.
+    // Keep the current durable server baseline; replay only the older page's
+    // delta from the durable state it actually observed, with explicit conflicts.
+    const branches = [
+      { base: observed?.local ?? inMemory.base, local: inMemory.local },
+      ...(inMemory.recoveries ?? []), ...(durable.recoveries ?? []),
+    ];
+    pending = { ...copy(durable), batchId: crypto.randomUUID(),
+      recoveries: branches.filter((branch, i) => !branches.slice(0, i).some(other => equal(branch, other))) };
+  }
   const cached = loadServerCache(instructorId);
   let remote: Awaited<ReturnType<typeof fetchData>> | null = null;
   try { remote = await fetchData(token); }
@@ -167,9 +182,15 @@ export async function hydrateFromServer(instructorId: string, token: string | nu
     write: (blob, revision) => putData(blob, revision, token),
     persist: (entry) => {
       if (myGeneration !== generation) return false;
+      let before: Envelope | null = null;
+      try { before = loadOutbox(instructorId); } catch { /* Preserve the failed snapshot in memory. */ }
       const saved = saveOutbox(instructorId, entry);
-      if (saved || equal(entry.base, entry.local)) memoryOutboxes.delete(instructorId);
-      else memoryOutboxes.set(instructorId, copy(entry));
+      if (saved || (equal(entry.base, entry.local) && !entry.recoveries?.length)) {
+        memoryOutboxes.delete(instructorId); memoryOutboxBases.delete(instructorId);
+      } else {
+        if (!memoryOutboxes.has(instructorId)) memoryOutboxBases.set(instructorId, before);
+        memoryOutboxes.set(instructorId, copy(entry));
+      }
       // Compatibility cache is only a convenience; outbox is authoritative.
       if (saved) saveServerCache(instructorId, entry.local as unknown as Database, entry.revision);
       return saved;
@@ -185,7 +206,10 @@ export async function hydrateFromServer(instructorId: string, token: string | nu
   sharedReports = (remote?.sharedReports ?? []) as SharedReportView[];
   hydrated = true;
   if (remote) engine.reconcile({ blob: documentOf(serverBlob!), updatedAt: remote.updatedAt });
-  else { engine.status = 'pending'; engine.persist(); syncStatus = engine.status; }
+  else if (engine.recover()) {
+    engine.status = 'pending'; engine.persist();
+    db = copy(engine.local) as unknown as Database; syncStatus = engine.status;
+  }
   notifyListeners();
   if (!engine.conflicts.length && !equal(engine.base, engine.local)) void engine.flush();
 }

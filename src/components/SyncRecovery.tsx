@@ -29,9 +29,10 @@ export function SyncRecovery() {
   const conflict = conflicts[0];
   if (!conflict) return null;
   const currentChoice = choice?.conflict === conflict ? choice.side : null;
+  const deviceRecovery = conflict.source === 'device';
   return <main className="mx-auto max-w-2xl space-y-4 p-4">
     <h1 className="text-xl font-semibold">Your changes need attention</h1>
-    <p>This record changed in two different ways. Review both versions before choosing.</p>
+    <p>{deviceRecovery ? 'An earlier page and another tab saved different pending changes. Review both versions before choosing. Neither version is a server confirmation.' : 'This record changed in two different ways. Review both versions before choosing.'}</p>
     {status === 'storage-error' ? <p role="alert" className="rounded border border-amber-500 p-3">This device could not store the latest changes. Keep this page open. Download a recovery backup before leaving; closing or reloading can lose memory-only edits. A choice that cannot be stored will keep both versions open.</p> : <p>These versions still need a choice and are not synced. Unfinished drafts may exist only in this open page. Download and check a recovery backup before leaving.</p>}
     <section aria-label="Recovery backup" className="space-y-2 rounded border p-3 text-sm">
       <p>The backup includes this account’s pending edits, both conflicting versions and unfinished log drafts with their selected pictures. Keep it private. It does not save or sync changes in the app.</p>
@@ -43,14 +44,14 @@ export function SyncRecovery() {
     {conflict.deletionBlocked && <p>New or changed records still depend on this item. Keep it here so those records remain accessible; you can review and remove them in the app afterward.</p>}
     <div className="grid gap-4 sm:grid-cols-2">
       {(['local', 'remote'] as const).map(side => <section key={side} className="min-w-0 rounded-xl border p-3">
-        <h2 className="mb-3 font-semibold">{side === 'local' ? 'This device’s version' : 'Server version'}</h2>
+        <h2 className="mb-3 font-semibold">{deviceRecovery ? (side === 'local' ? 'Earlier page’s version' : 'Other tab’s saved version') : (side === 'local' ? 'This device’s version' : 'Server version')}</h2>
         <div className="max-h-72 overflow-auto"><Version value={conflict[side]} /></div>
         <button disabled={conflict.deletionBlocked && conflict[side] === undefined} onClick={() => setChoice({ side, conflict })} className="mt-3 rounded bg-sky-600 px-3 py-2 text-white">Use this version</button>
       </section>)}
     </div>
     {choice && !currentChoice && <p role="status">The versions changed. Review them again before choosing.</p>}
     {currentChoice && <div className="space-y-2 rounded border p-3">
-      <p>Keep {currentChoice === 'local' ? 'this device’s' : 'the server'} version? The competing version will not be used for this record.</p>
+      <p>Keep {deviceRecovery ? (currentChoice === 'local' ? 'the earlier page’s' : 'the other tab’s saved') : (currentChoice === 'local' ? 'this device’s' : 'the server')} version? The competing version will not be used for this record.</p>
       <button className="rounded bg-sky-600 px-3 py-2 text-white" onClick={() => { const stored = resolveSyncConflict(0, currentChoice, conflict); setChoice(null); if (!stored) setMessage('The choice was not stored. Both versions remain available; keep this page open, download a backup and retry recovery.'); }}>Confirm choice</button>
       <button className="ml-3 px-3 py-2" onClick={() => setChoice(null)}>Cancel</button>
     </div>}
