@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { GuideDogIllustration, type GuideDogCoat } from '../components/GuideDogIllustration';
 import { ApiError } from '../lib/api';
 import { createAccount, login } from '../lib/auth';
+import { hasMemorySyncRecovery } from '../data/store';
+import { hasMemoryDraftRecovery } from '../lib/newLogDraft';
 
 export function Login({ coat }: { coat: GuideDogCoat }) {
   const [mode, setMode] = useState<'login' | 'create'>('login');
@@ -40,6 +42,9 @@ export function Login({ coat }: { coat: GuideDogCoat }) {
           </p>
         </div>
 
+        {(hasMemorySyncRecovery() || hasMemoryDraftRecovery()) && <p role="status" className="rounded-md border border-amber-500 p-3 text-sm">
+          Some changes are held only in this open page. Keep it open and log back in to the same instructor account to recover them. Closing or reloading can lose changes that were not stored on this device.
+        </p>}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">

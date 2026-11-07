@@ -2,9 +2,9 @@
 // Record IDs are stable across retries; a lost acknowledgement is reconciled
 // against base instead of replaying a create action with a new ID.
 export type Document = Record<string, unknown>;
-export type Conflict = { collection: string; id?: string; local: unknown; remote: unknown; deletionBlocked?: boolean; folderMovesOnly?: boolean };
+export type Conflict = { collection: string; id?: string; local: unknown; remote: unknown; deletionBlocked?: boolean; folderMovesOnly?: boolean; source?: 'device' };
 export type Snapshot = { blob: Document; updatedAt: string };
-export type Envelope = { base: Document; local: Document; revision: string | null; batchId: string };
+export type Envelope = { base: Document; local: Document; revision: string | null; batchId: string; recoveries?: { base: Document; local: Document }[] };
 export type Status = 'idle' | 'syncing' | 'synced' | 'pending' | 'conflict' | 'storage-error' | 'auth';
 export const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 export function equal(a: unknown, b: unknown): boolean {
@@ -125,7 +125,8 @@ export class SyncEngine {
   batchId: string;
   status: Status = 'idle';
   conflicts: Conflict[] = [];
-  private candidate: { blob: Document; remote: Snapshot } | null = null;
+  private candidate: { blob: Document; remote: Snapshot; recovery?: boolean } | null = null;
+  private recoveries: { base: Document; local: Document }[];
   private running: Promise<void> | null = null;
   private stopped = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -135,8 +136,26 @@ export class SyncEngine {
     this.io = io;
     this.base = copy(envelope.base); this.local = copy(envelope.local);
     this.revision = envelope.revision; this.batchId = envelope.batchId;
+    this.recoveries = copy(envelope.recoveries ?? []);
   }
-  envelope(): Envelope { return { base: this.base, local: this.local, revision: this.revision, batchId: this.batchId }; }
+  envelope(): Envelope { return { base: this.base, local: this.local, revision: this.revision, batchId: this.batchId,
+    ...(this.recoveries.length ? { recoveries: copy(this.recoveries) } : {}) }; }
+  // Resolve pending work from a previous page before comparing with the server.
+  // Both sources remain in the persisted envelope until an explicit final choice.
+  recover(): boolean {
+    while (this.recoveries.length) {
+      const earlier = this.recoveries[0];
+      const result = merge(earlier.base, earlier.local, this.local);
+      if (result.conflicts.length) {
+        this.conflicts = result.conflicts.map(c => ({ ...c, source: 'device' }));
+        this.candidate = { blob: result.blob, remote: { blob: copy(this.local), updatedAt: this.revision! }, recovery: true };
+        this.status = 'conflict'; this.persist(); this.emit(); return false;
+      }
+      this.local = copy(result.blob); this.recoveries.shift(); this.batchId = crypto.randomUUID();
+    }
+    return true;
+  }
+  recoveryRemote(): Document { return copy(this.candidate?.remote.blob ?? this.base); }
   private emit() { if (!this.stopped) this.io.changed(this.local, this.status, this.conflicts); }
   persist(): boolean {
     const saved = this.io.persist(this.envelope());
@@ -155,6 +174,7 @@ export class SyncEngine {
     return saved;
   }
   reconcile(remote: Snapshot): boolean {
+    if (!this.recover()) return false;
     const result = merge(this.base, this.local, remote.blob);
     if (result.conflicts.length) {
       this.conflicts = result.conflicts; this.candidate = { blob: result.blob, remote };
@@ -168,19 +188,34 @@ export class SyncEngine {
     this.persist(); this.emit(); return true;
   }
   resolve(index: number, side: 'local' | 'remote') {
-    if (!this.candidate) return;
+    if (!this.candidate) return false;
     const conflict = this.conflicts[index];
-    if (!conflict || (conflict.deletionBlocked && conflict[side] === undefined)) return;
-    applyChoice(this.candidate.blob, conflict, conflict[side]);
-    this.conflicts = this.conflicts.filter((_, i) => i !== index);
-    if (this.conflicts.length) { this.emit(); return; }
-    this.local = copy(this.candidate.blob); this.base = copy(this.candidate.remote.blob);
-    this.revision = this.candidate.remote.updatedAt; this.candidate = null;
-    this.batchId = crypto.randomUUID(); this.status = 'pending'; this.persist(); this.emit(); void this.flush();
+    if (!conflict || (conflict.deletionBlocked && conflict[side] === undefined)) return false;
+    // Keep the unresolved alternatives until the device can retain recovery state.
+    this.status = 'conflict';
+    if (!this.persist()) { this.emit(); return false; }
+    const chosen = copy(this.candidate.blob);
+    applyChoice(chosen, conflict, conflict[side]);
+    const remaining = this.conflicts.filter((_, i) => i !== index);
+    if (remaining.length) { this.candidate.blob = chosen; this.conflicts = remaining; this.emit(); return true; }
+    const previous = this.envelope();
+    this.local = chosen;
+    if (this.candidate.recovery) this.recoveries.shift();
+    else { this.base = copy(this.candidate.remote.blob); this.revision = this.candidate.remote.updatedAt; }
+    this.batchId = crypto.randomUUID(); this.status = 'pending';
+    if (!this.persist()) {
+      this.local = previous.local; this.base = previous.base; this.revision = previous.revision; this.batchId = previous.batchId;
+      this.recoveries = copy(previous.recoveries ?? []);
+      // Restore the account-scoped volatile snapshot too; no choice was committed.
+      this.io.persist(this.envelope()); this.emit(); return false;
+    }
+    this.conflicts = []; this.candidate = null;
+    if (this.recover()) { this.persist(); this.emit(); void this.flush(); }
+    return true;
   }
   async refresh(): Promise<void> {
     if (this.running) await this.running;
-    if (this.stopped) return;
+    if (this.stopped || !this.recover()) return;
     try {
       const remote = await this.io.read();
       if (this.stopped) return;

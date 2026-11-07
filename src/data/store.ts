@@ -1,4 +1,4 @@
-import { SyncEngine, copy, equal, type Conflict, type Document, type Status } from '../lib/sync';
+import { SyncEngine, copy, equal, type Conflict, type Document, type Envelope, type Status } from '../lib/sync';
 import { dogStatistics, milestoneStatistics, type MilestoneStats } from '../lib/milestoneAnalytics';
 import {
   isFutureSessionDate,
@@ -45,6 +45,8 @@ import { buildDefaultMilestones } from './defaultMilestones';
 import { logError, logEvent } from '../lib/diagnostics';
 import { ApiError, fetchData, putData, transferDog, uploadPhoto, getToken } from '../lib/api';
 import { dataUrlToBlob } from '../lib/compressImage';
+import { prepareRecoveryDrafts } from '../lib/newLogDraft';
+import { syncRecoveryBackup } from '../lib/syncRecoveryBackup';
 import {
   backfillAllowedOutcomes,
   applyOutcomeToCompletion,
@@ -79,6 +81,12 @@ let generation = 0;
 export type SyncStatus = Status;
 let syncStatus: SyncStatus = 'idle';
 let engine: SyncEngine | null = null;
+// Retain failed local writes across in-page expiry/logout, scoped to their
+// instructor. These snapshots are volatile, never evidence of device storage.
+const memoryOutboxes = new Map<string, Envelope>();
+// The durable snapshot observed before this page's first failed write.
+const memoryOutboxBases = new Map<string, Envelope | null>();
+export function hasMemorySyncRecovery() { return memoryOutboxes.size > 0; }
 let syncConflicts: Conflict[] = [];
 const listeners = new Set<() => void>();
 function notifyListeners() { listeners.forEach((listener) => listener()); }
@@ -93,8 +101,19 @@ function notify(): boolean {
   return saved;
 }
 function syncToServer(): void { notify(); }
-export async function retrySync(): Promise<void> { await engine?.flush(); }
-export function resolveSyncConflict(index: number, side: 'local' | 'remote'): void { engine?.resolve(index, side); }
+export async function retrySync(): Promise<void> { if (engine?.conflicts.length) await engine.refresh(); else await engine?.flush(); }
+export function resolveSyncConflict(index: number, side: 'local' | 'remote', expected?: Conflict): boolean {
+  if (expected && syncConflicts[index] !== expected) return false;
+  return engine?.resolve(index, side) ?? false;
+}
+export async function getSyncRecoveryBackup() {
+  if (!engine || !currentInstructorId) throw new Error('Sign in to the original account.');
+  const owner = currentInstructorId, generationAtStart = generation;
+  const envelope = engine.envelope(), remote = engine.recoveryRemote(), conflicts = syncConflicts;
+  const drafts = await prepareRecoveryDrafts(owner);
+  if (owner !== currentInstructorId || generationAtStart !== generation) throw new Error('Account changed while preparing backup.');
+  return syncRecoveryBackup(owner, envelope, remote, conflicts, drafts);
+}
 export function useSyncConflicts(): Conflict[] { return useSyncExternalStore(subscribe, () => syncConflicts); }
 export function getStoreIdentity() { return { generation, instructorId: currentInstructorId }; }
 export function getSyncState() { return { status: syncStatus, conflicts: syncConflicts, blob: db }; }
@@ -118,15 +137,28 @@ async function acquireAccountLock(instructorId: string, ownerGeneration: number)
 }
 
 export async function hydrateFromServer(instructorId: string, token: string | null = getToken()): Promise<void> {
-  const inMemory = currentInstructorId === instructorId ? engine?.envelope() : null;
+  const inMemory = (currentInstructorId === instructorId ? engine?.envelope() : null) ?? memoryOutboxes.get(instructorId);
   const myGeneration = ++generation;
   engine?.stop();
   const acquired = await acquireAccountLock(instructorId, myGeneration);
   if (myGeneration !== generation) return;
-  if (!acquired) throw new Error('This account is open in another tab. Close that tab, then retry here so its pending changes stay safe.');
+  if (!acquired) throw new Error('This account is open in another tab. Finish or back up unfinished work there before closing it, then retry here. Closing can lose work held only in that page.');
   currentInstructorId = instructorId;
   storeToken = token;
-  const pending = inMemory ?? loadOutbox(instructorId);
+  const durable = loadOutbox(instructorId);
+  const observed = memoryOutboxBases.get(instructorId);
+  let pending = inMemory ?? durable;
+  if (inMemory && durable && !equal(inMemory, durable) && !equal(observed, durable)) {
+    // Do not let an old page replace another owner's newer unsynced outbox.
+    // Keep the current durable server baseline; replay only the older page's
+    // delta from the durable state it actually observed, with explicit conflicts.
+    const branches = [
+      { base: observed?.local ?? inMemory.base, local: inMemory.local },
+      ...(inMemory.recoveries ?? []), ...(durable.recoveries ?? []),
+    ];
+    pending = { ...copy(durable), batchId: crypto.randomUUID(),
+      recoveries: branches.filter((branch, i) => !branches.slice(0, i).some(other => equal(branch, other))) };
+  }
   const cached = loadServerCache(instructorId);
   let remote: Awaited<ReturnType<typeof fetchData>> | null = null;
   try { remote = await fetchData(token); }
@@ -150,7 +182,15 @@ export async function hydrateFromServer(instructorId: string, token: string | nu
     write: (blob, revision) => putData(blob, revision, token),
     persist: (entry) => {
       if (myGeneration !== generation) return false;
+      let before: Envelope | null = null;
+      try { before = loadOutbox(instructorId); } catch { /* Preserve the failed snapshot in memory. */ }
       const saved = saveOutbox(instructorId, entry);
+      if (saved || (equal(entry.base, entry.local) && !entry.recoveries?.length)) {
+        memoryOutboxes.delete(instructorId); memoryOutboxBases.delete(instructorId);
+      } else {
+        if (!memoryOutboxes.has(instructorId)) memoryOutboxBases.set(instructorId, before);
+        memoryOutboxes.set(instructorId, copy(entry));
+      }
       // Compatibility cache is only a convenience; outbox is authoritative.
       if (saved) saveServerCache(instructorId, entry.local as unknown as Database, entry.revision);
       return saved;
@@ -166,7 +206,10 @@ export async function hydrateFromServer(instructorId: string, token: string | nu
   sharedReports = (remote?.sharedReports ?? []) as SharedReportView[];
   hydrated = true;
   if (remote) engine.reconcile({ blob: documentOf(serverBlob!), updatedAt: remote.updatedAt });
-  else { engine.status = 'pending'; engine.persist(); syncStatus = engine.status; }
+  else if (engine.recover()) {
+    engine.status = 'pending'; engine.persist();
+    db = copy(engine.local) as unknown as Database; syncStatus = engine.status;
+  }
   notifyListeners();
   if (!engine.conflicts.length && !equal(engine.base, engine.local)) void engine.flush();
 }

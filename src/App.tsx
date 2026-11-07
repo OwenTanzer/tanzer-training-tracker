@@ -13,7 +13,7 @@ import {
   resetLocalStore,
   seedDefaultTemplatesIfEmpty,
   useHydrated,
-  useSyncStatus,
+  useSyncConflicts,
 } from './data/store';
 import type { Database } from './data/db';
 import { AccountSettings } from './pages/AccountSettings';
@@ -43,8 +43,9 @@ function App() {
   );
   const session = useSession();
   const hydrated = useHydrated();
-  const syncStatus = useSyncStatus();
+  const syncConflicts = useSyncConflicts();
   const [hydrateError, setHydrateError] = useState<string | null>(null);
+  const [hydrateAttempt, setHydrateAttempt] = useState(0);
   const [legacyImport, setLegacyImport] = useState<Database | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
@@ -79,7 +80,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, hydrateAttempt]);
 
   // Keyed on instructorId rather than the whole session object — refreshAccount()
   // itself reassigns session (a new object) once it applies, and depending on
@@ -143,7 +144,7 @@ function App() {
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 p-6 text-center bg-white dark:bg-gray-900">
         <p className="text-red-500">{hydrateError}</p>
         <button
-          onClick={() => window.location.reload()}
+          onClick={() => setHydrateAttempt(attempt => attempt + 1)}
           className="rounded-md bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600"
         >
           Retry
@@ -202,7 +203,7 @@ function App() {
     );
   }
 
-  if (syncStatus === 'conflict') return <SyncRecovery />;
+  if (syncConflicts.length) return <SyncRecovery />;
 
   if (!landingDone) {
     return (

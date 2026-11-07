@@ -181,3 +181,34 @@ test('two devices cannot create duplicate progress records for the same dog and 
   assert.equal((result.blob.completions as unknown[]).length, 1);
   assert.equal(result.conflicts.length, 1);
 });
+
+test('a conflict choice under failed storage retains the unresolved local version', async () => {
+  const h = harness({ reports: [{ id: 'r', notes: 'base' }] });
+  try { h.setMode('offline'); const e = h.create(); e.stage({ reports: [{ id: 'r', notes: 'local' }] }); await e.flush(); h.external({ reports: [{ id: 'r', notes: 'remote' }] }); h.setMode('online'); await e.flush();
+    const before = e.envelope(), alternatives = copy(e.conflicts), durable = h.saved(); h.setQuota(true); e.resolve(0, 'remote');
+    assert.deepEqual(e.envelope(), before); assert.deepEqual(e.conflicts, alternatives); assert.deepEqual(h.saved(), durable); assert.equal(h.writes(), 0);
+  } finally { h.stop(); }
+});
+
+test('a choice whose final persistence fails retains both alternatives and original envelope', async () => {
+  const base = { reports: [{ id: 'r', notes: 'base' }] }, local = { reports: [{ id: 'r', notes: 'local' }] }, remote = { reports: [{ id: 'r', notes: 'remote' }] };
+  let calls = 0, failAt = Infinity, writes = 0, volatile: Envelope | null = null;
+  const e = new SyncEngine({ read: async () => ({ blob: remote, updatedAt: 'r2' }), write: async () => { writes++; return { updatedAt: 'r3' }; }, persist: value => { volatile = copy(value); return ++calls < failAt; }, changed: () => {}, diagnostic: () => {} }, { base, local, revision: 'r1', batchId: 'stable' });
+  try {
+    await e.flush(); const before = e.envelope(), alternatives = copy(e.conflicts);
+    failAt = calls + 2; const resolved = e.resolve(0, 'remote');
+    assert.deepEqual(e.envelope(), before); assert.deepEqual(e.conflicts, alternatives); assert.equal(resolved, false); assert.deepEqual(volatile, before); assert.equal(writes, 0); assert.equal(e.status, 'storage-error');
+    failAt = Infinity; assert.equal(e.resolve(0, 'remote'), true); await e.flush(); assert.deepEqual(e.envelope().local, remote);
+  } finally { e.stop(); }
+});
+
+test('both stale displayed choices reconcile with a newer server before publishing', async () => {
+  for (const side of ['local', 'remote'] as const) {
+    const h = harness({ reports: [{ id: 'r', notes: 'base' }] });
+    try { h.setMode('offline'); const e = h.create(); e.stage({ reports: [{ id: 'r', notes: 'local' }] }); await e.flush(); h.external({ reports: [{ id: 'r', notes: 'shown remote' }] }); h.setMode('online'); await e.flush(); h.external({ reports: [{ id: 'r', notes: 'unseen newest' }] }); e.resolve(0, side); await e.flush();
+      assert.equal((h.remote().reports as any[])[0].notes, 'unseen newest'); assert.equal(h.writes(), 0);
+      if (side === 'local') { assert.equal(e.conflicts.length, 1); assert.equal((e.conflicts[0].remote as any).notes, 'unseen newest'); }
+      else assert.deepEqual(e.envelope().local, h.remote());
+    } finally { h.stop(); }
+  }
+});

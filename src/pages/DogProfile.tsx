@@ -469,7 +469,15 @@ export function DogProfile() {
   const skillSessionCounts = useDogSkillSessionCounts(dogId ?? '');
   const milestoneSessionCounts = useDogMilestoneSessionCounts(dogId ?? '');
 
-  const [hideCompletedSkills, setHideCompletedSkills] = useState(false);
+  // Snapshot the filter only on an explicit action, so consecutive checks do not remove rows.
+  const [hiddenSkills, setHiddenSkills] = useState<{ dogId: string; ids: Set<string> } | null>(null);
+  const hideCompletedSkills = hiddenSkills !== null && hiddenSkills.dogId === dogId;
+  function refreshHiddenSkills() {
+    setHiddenSkills({
+      dogId: dogId ?? '',
+      ids: new Set(completions.filter((c) => c.completed && !c.flagged).map((c) => c.checklistItemId)),
+    });
+  }
   const [phaseFilter, setPhaseFilter] = useState<Phase | 'all'>('all');
   const [redFlagOnly, setRedFlagOnly] = useState(false);
   const [search, setSearch] = useState('');
@@ -518,9 +526,9 @@ export function DogProfile() {
       // A flagged skill means "needs attention" — that outranks "hide
       // completed", so a flagged-and-completed skill stays visible.
       if (completion?.flagged) return true;
-      return !completion?.completed;
+      return !completion?.completed || !hiddenSkills?.ids.has(item.id);
     });
-  }, [checklist, completions, hideCompletedSkills]);
+  }, [checklist, completions, hideCompletedSkills, hiddenSkills]);
 
   if (!dog) {
     return <p className="p-4 text-gray-500">Dog not found.</p>;
@@ -1126,11 +1134,17 @@ export function DogProfile() {
             <input
               type="checkbox"
               checked={hideCompletedSkills}
-              onChange={(e) => setHideCompletedSkills(e.target.checked)}
+              onChange={(e) => e.target.checked ? refreshHiddenSkills() : setHiddenSkills(null)}
             />
             Hide completed skills
           </label>
         </div>
+        {hideCompletedSkills && (
+          <div className="space-y-1 text-xs text-gray-500">
+            <p>New check-offs stay here until you hide them. Flagged skills stay visible.</p>
+            <button type="button" className="underline" onClick={refreshHiddenSkills}>Hide newly completed</button>
+          </div>
+        )}
         <ul className="space-y-1">
           {visibleChecklist.map((item) => {
             const completion = completions.find((c) => c.checklistItemId === item.id);
