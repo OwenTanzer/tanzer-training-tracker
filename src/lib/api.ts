@@ -125,8 +125,8 @@ export function login(name: string, passcode: string): Promise<AccountResponse> 
   return request('/api/login', { method: 'POST', body: { name, passcode }, auth: false });
 }
 
-export function logout(): Promise<{ ok: boolean }> {
-  return request('/api/login', { method: 'DELETE' });
+export function logout(token: string): Promise<{ ok: boolean }> {
+  return request('/api/login', { method: 'DELETE', token });
 }
 
 export interface AccountUpdateResponse {

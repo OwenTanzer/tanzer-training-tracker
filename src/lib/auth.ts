@@ -125,14 +125,19 @@ export async function refreshAccount(): Promise<void> {
 }
 
 export async function logout(): Promise<void> {
+  const token = session?.token;
+  if (!token) return;
   try {
-    await api.logout();
+    await api.logout(token);
   } catch {
-    // Best-effort server-side revoke — clear the local session regardless so
-    // the user isn't stuck if the server is unreachable.
+    // Best-effort revocation: still sign out this session on failure, but
+    // never clear a newer session that took over while the request waited.
   }
+  // A newer login (in this or another tab) owns its credentials. Completion
+  // of this older sign-out may clear only the session it started with.
+  if (session?.token !== token) return;
   session = null;
-  persistSession();
+  if (api.getToken() === token) persistSession();
   notify();
 }
 
