@@ -63,3 +63,8 @@ uploads, missing acknowledgements, account changes, form retries, privacy, confl
 relationships, progress identities and overlapping startup locks. Phone interaction
 checks remain outstanding. Investigating/recovering the historical Hubble log is
 separate from preventing future loss.
+
+
+## Deferred recovery and continued access
+
+The recovery screen offers Continue to app. It first reads the current server snapshot and atomically retains the previous pending document and device-handoff branches in the account outbox's `deferred` list. The active document then uses the confirmed server snapshot; new edits can sync normally without uploading an unresolved branch. This defers all earlier pending changes, not only the displayed conflict. Deferred branches survive reload and appear under Review earlier changes in the header. Reviewing moves those branches back through the existing three-way merge and explicit conflict choices, retaining subsequent new work. Failed server reads or failed outbox writes leave the original conflict and pending versions available. Recovery backups include deferred branches. No backend or schema migration is required.

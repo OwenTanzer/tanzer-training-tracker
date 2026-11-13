@@ -106,6 +106,9 @@ export function resolveSyncConflict(index: number, side: 'local' | 'remote', exp
   if (expected && syncConflicts[index] !== expected) return false;
   return engine?.resolve(index, side) ?? false;
 }
+export async function deferSyncRecovery() { return await engine?.deferRecovery() ?? false; }
+export function resumeSyncRecovery() { return engine?.resumeRecovery() ?? false; }
+export function useDeferredRecoveryCount() { return useSyncExternalStore(subscribe, () => engine?.deferredCount() ?? 0); }
 export async function getSyncRecoveryBackup() {
   if (!engine || !currentInstructorId) throw new Error('Sign in to the original account.');
   const owner = currentInstructorId, generationAtStart = generation;
@@ -156,7 +159,9 @@ export async function hydrateFromServer(instructorId: string, token: string | nu
       { base: observed?.local ?? inMemory.base, local: inMemory.local },
       ...(inMemory.recoveries ?? []), ...(durable.recoveries ?? []),
     ];
+    const deferred = [...(inMemory.deferred ?? []), ...(durable.deferred ?? [])];
     pending = { ...copy(durable), batchId: crypto.randomUUID(),
+      deferred: deferred.filter((branch, i) => !deferred.slice(0, i).some(other => equal(branch, other))),
       recoveries: branches.filter((branch, i) => !branches.slice(0, i).some(other => equal(branch, other))) };
   }
   const cached = loadServerCache(instructorId);
@@ -185,7 +190,7 @@ export async function hydrateFromServer(instructorId: string, token: string | nu
       let before: Envelope | null = null;
       try { before = loadOutbox(instructorId); } catch { /* Preserve the failed snapshot in memory. */ }
       const saved = saveOutbox(instructorId, entry);
-      if (saved || (equal(entry.base, entry.local) && !entry.recoveries?.length)) {
+      if (saved || (equal(entry.base, entry.local) && !entry.recoveries?.length && !entry.deferred?.length)) {
         memoryOutboxes.delete(instructorId); memoryOutboxBases.delete(instructorId);
       } else {
         if (!memoryOutboxes.has(instructorId)) memoryOutboxBases.set(instructorId, before);

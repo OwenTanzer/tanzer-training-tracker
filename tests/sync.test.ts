@@ -212,3 +212,67 @@ test('both stale displayed choices reconcile with a newer server before publishi
     } finally { h.stop(); }
   }
 });
+
+test('deferred recovery survives reopen while new work syncs, then can be resolved', async () => {
+  const initial = { reports: [], dogs: [{ id: 'dog', name: 'Original' }] };
+  const h = harness(initial);
+  try {
+    const e = h.create();
+    h.external({ ...initial, dogs: [{ id: 'dog', name: 'Server' }] });
+    e.stage({ ...initial, dogs: [{ id: 'dog', name: 'Phone' }] }); await e.flush();
+    assert.equal(e.conflicts.length, 1);
+    assert.equal(await e.deferRecovery(), true);
+    assert.equal(e.conflicts.length, 0); assert.equal(e.deferredCount(), 1);
+    assert.equal(h.writes(), 0); assert.equal((e.local.dogs as any[])[0].name, 'Server');
+    e.stop(); const reopened = h.create(h.saved()); await reopened.flush();
+    assert.equal(reopened.conflicts.length, 0); assert.equal(reopened.deferredCount(), 1);
+    reopened.stage({ ...reopened.local, reports: [{ id: 'new', notes: 'New ordinary work' }] }); await reopened.flush();
+    assert.equal((h.remote().reports as any[])[0].id, 'new');
+    assert.equal(reopened.resumeRecovery(), true); assert.equal(reopened.conflicts.length, 1);
+    assert.equal(reopened.resolve(0, 'local'), true); await reopened.flush();
+    assert.equal((h.remote().dogs as any[])[0].name, 'Phone');
+    assert.equal((h.remote().reports as any[])[0].id, 'new');
+    assert.equal(reopened.deferredCount(), 0);
+  } finally { h.stop(); }
+});
+
+test('failed deferred persistence retains original conflict and pending edits', async () => {
+  const initial = { reports: [{ id: 'r', notes: 'Original' }], dogs: [] };
+  const h = harness(initial);
+  try {
+    const e = h.create(); h.external({ ...initial, reports: [{ id: 'r', notes: 'Server' }] });
+    e.stage({ ...initial, reports: [{ id: 'r', notes: 'Phone' }] }); await e.flush();
+    const before = h.saved(); h.setQuota(true);
+    assert.equal(await e.deferRecovery(), false); assert.equal(e.conflicts.length, 1);
+    assert.deepEqual(e.local, before.local); assert.equal(e.deferredCount(), 0);
+    assert.deepEqual(h.saved(), before); assert.equal(h.writes(), 0);
+  } finally { h.stop(); }
+});
+
+test('offline continuation does not discard unresolved work', async () => {
+  const initial = { reports: [], dogs: [{ id: 'dog', name: 'Original' }] };
+  const h = harness(initial);
+  try {
+    const e = h.create(); h.external({ ...initial, dogs: [{ id: 'dog', name: 'Server' }] });
+    e.stage({ ...initial, dogs: [{ id: 'dog', name: 'Phone' }] }); await e.flush();
+    h.setMode('offline'); assert.equal(await e.deferRecovery(), false);
+    assert.equal(e.conflicts.length, 1); assert.equal(e.deferredCount(), 0);
+    assert.equal((e.local.dogs as any[])[0].name, 'Phone');
+  } finally { h.stop(); }
+});
+
+test('device handoff conflicts can be deferred without dropping either pending branch', async () => {
+  const base = { reports: [], dogs: [{ id: 'dog', name: 'Original' }] };
+  const h = harness(base);
+  try {
+    const e = h.create({ base, local: { ...base, dogs: [{ id: 'dog', name: 'Other tab' }] }, revision: 'r0', batchId: 'handoff', recoveries: [{ base, local: { ...base, dogs: [{ id: 'dog', name: 'Earlier page' }] } }] });
+    await e.flush(); assert.equal(e.conflicts[0].source, 'device');
+    assert.equal(await e.deferRecovery(), true); assert.equal(e.deferredCount(), 2);
+    const saved = h.saved(); e.stop(); const reopened = h.create(saved); await reopened.flush();
+    assert.equal(reopened.conflicts.length, 0); assert.equal(reopened.deferredCount(), 2);
+    assert.equal(reopened.resumeRecovery(), true); assert.equal(reopened.conflicts.length, 1);
+    assert.equal(reopened.resolve(0, 'local'), true); await reopened.flush();
+    assert.equal(reopened.conflicts.length, 0);
+    assert.equal((h.remote().dogs as any[])[0].name, 'Earlier page');
+  } finally { h.stop(); }
+});
