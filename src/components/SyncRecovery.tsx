@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { deferSyncRecovery, resumeSyncRecovery, useDeferredRecoveryCount, getSyncRecoveryBackup, resolveSyncConflict, retrySync, useSyncConflicts, useSyncStatus } from '../data/store';
-import { downloadSyncRecovery } from '../lib/syncRecoveryBackup';
+import { deferSyncRecovery, resumeSyncRecovery, useDeferredRecoveryCount, resolveSyncConflict, retrySync, useSyncConflicts, useSyncStatus } from '../data/store';
 import type { Conflict } from '../lib/sync';
 
 function versionLabel(value: unknown): string {
@@ -26,7 +25,6 @@ export function SyncRecovery() {
   const [message, setMessage] = useState('');
   const [retrying, setRetrying] = useState(false);
   const [continuing, setContinuing] = useState(false);
-  const [backupBusy, setBackupBusy] = useState(false);
   const conflict = conflicts[0];
   if (!conflict) return null;
   const currentChoice = choice?.conflict === conflict ? choice.side : null;
@@ -40,15 +38,11 @@ export function SyncRecovery() {
         if (!continued) setMessage('Your account changed. Open the app again.');
         setContinuing(false);
       }}>{continuing ? 'Opening app…' : 'Continue to app'}</button>
-      <p className="text-sm">Open the app using the last server data already loaded. Every earlier unsynced change is set aside for later review. If device storage is unavailable, those changes may only remain in this open page. No backup, network check or recovery choice is required to continue.</p>
+      <p className="text-sm">Open the app using the last server data already loaded. Every earlier unsynced change is set aside for later review. You can continue even if device storage or the network is unavailable.</p>
     </section>
     <p>{deviceRecovery ? 'An earlier page and another tab saved different pending changes. Review both versions before choosing. Neither version is a server confirmation.' : 'This record changed in two different ways. Review both versions before choosing.'}</p>
-    {status === 'storage-error' ? <p role="alert" className="rounded border border-amber-500 p-3">This device could not store the latest changes. Keep this page open. Download a recovery backup before leaving; closing or reloading can lose memory-only edits. A choice that cannot be stored will keep both versions open.</p> : <p>These earlier changes are not synced. Continue to the app now, or review the versions below. A recovery backup is optional; unfinished drafts may exist only in this open page.</p>}
-    <section aria-label="Recovery backup" className="space-y-2 rounded border p-3 text-sm">
-      <p>The backup includes this account’s pending edits, both conflicting versions and unfinished log drafts with their selected pictures. Keep it private. It does not save or sync changes in the app.</p>
-      <button className="rounded border px-3 py-2" disabled={backupBusy} onClick={async () => { setBackupBusy(true); setMessage('Preparing the recovery file. Keep this page open; no backup is confirmed yet.'); try { downloadSyncRecovery(await getSyncRecoveryBackup()); setMessage('Download requested. Check that the file exists and opens before relying on it. A cancelled or blocked download leaves no backup. Download again after changes.'); } catch { setMessage('Could not prepare the complete backup. Keep this page open and retry. Nothing has been cleared.'); } finally { setBackupBusy(false); } }}>Download recovery backup</button>
-      {message && <p role="status">{message}</p>}
-    </section>
+    {status === 'storage-error' && <p role="status" className="text-sm text-amber-700">Device storage is unavailable. You can still continue into the app.</p>}
+    {message && <p role="status">{message}</p>}
     <button disabled={retrying} className="rounded border px-3 py-2" onClick={() => { setRetrying(true); void retrySync().finally(() => setRetrying(false)); }}>Retry recovery</button>
     <p className="font-medium">{versionLabel(conflict.local ?? conflict.remote)} · {conflicts.length} remaining</p>
     {conflict.deletionBlocked && <p>New or changed records still depend on this item. Keep it here so those records remain accessible; you can review and remove them in the app afterward.</p>}
@@ -62,10 +56,9 @@ export function SyncRecovery() {
     {choice && !currentChoice && <p role="status">The versions changed. Review them again before choosing.</p>}
     {currentChoice && <div className="space-y-2 rounded border p-3">
       <p>Keep {deviceRecovery ? (currentChoice === 'local' ? 'the earlier page’s' : 'the other tab’s saved') : (currentChoice === 'local' ? 'this device’s' : 'the server')} version? The competing version will not be used for this record.</p>
-      <button className="rounded bg-sky-600 px-3 py-2 text-white" onClick={() => { const stored = resolveSyncConflict(0, currentChoice, conflict); setChoice(null); if (!stored) setMessage('The choice was not stored. Both versions remain available; keep this page open, download a backup and retry recovery.'); }}>Confirm choice</button>
+      <button className="rounded bg-sky-600 px-3 py-2 text-white" onClick={() => { const stored = resolveSyncConflict(0, currentChoice, conflict); setChoice(null); if (!stored) setMessage('The choice was not stored. Both versions remain available. Continue to the app now, or retry recovery later.'); }}>Confirm choice</button>
       <button className="ml-3 px-3 py-2" onClick={() => setChoice(null)}>Cancel</button>
     </div>}
-    <p className="text-sm text-gray-500">Do not clear this app’s browser data. A backup needs review for recovery; no automatic import is provided.</p>
   </main>;
 }
 export function SyncIndicator() {
