@@ -1,9 +1,10 @@
+import { loadDraftPhoto, storeDraftPhoto, forgetDraftPhoto } from '../lib/draftPhotos';
 import { isFutureSessionDate, localSessionDate } from '../../shared/sessionDate';
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PhaseGroupedPicker } from '../components/PhaseGroupedPicker';
 import { equal } from '../lib/sync';
-import { ApiError, uploadPhoto } from '../lib/api';
+import { uploadPhoto } from '../lib/api';
 import { compressImageToBlob } from '../lib/compressImage';
 import { isDraftStale, discardVolatileDraft, retainPreparingDraft, loadNewLogDraft, restoreDraftPicture, saveNewLogDraft, clearNewLogDraft } from '../lib/newLogDraft';
 import { downloadLogBackup, logBackup, readBackupPicture } from '../lib/logBackup';
@@ -40,7 +41,7 @@ function NewReportForm() {
     // as the next new log. Keep any newer edits or unuploaded picture intact.
     const fields = (r: TrainingReport) => ({ ...r, createdDate: '', updatedDate: '' });
     if (!loaded.blocked && draft && recorded && !draft.newLocationName &&
-        ((!draft.pictureFile && !loaded.selectedFile) || !!draft.report.picture) &&
+        ((!draft.pictureFile && !loaded.selectedFile && !draft.photoKey) || !!draft.report.picture) &&
         isReportServerConfirmed(recorded) && equal(fields(draft.report), fields(recorded))) {
       if (draftOwner.instructorId && dogId) clearNewLogDraft(draftOwner.instructorId, dogId);
       return { draft: null, blocked: false } as typeof loaded;
@@ -57,8 +58,10 @@ function NewReportForm() {
   const inFlight = useRef(false);
   const editVersion = useRef(0);
   const currentPicture = useRef(initialPicture);
-  const [draftStatus, setDraftStatus] = useState<'empty' | 'writing' | 'local' | 'failed'>(initial.blocked || initial.memoryOnly ? 'failed' : initial.draft ? 'local' : 'empty');
-  const [pictureRead, setPictureRead] = useState({ file: initial.selectedFile ? null : initialPicture, value: initial.draft?.pictureFile ?? null, failed: !!initial.draft?.pictureFile && !initialPicture });
+  const [draftStatus, setDraftStatus] = useState<'empty' | 'local' | 'failed'>(initial.blocked || initial.memoryOnly ? 'failed' : initial.draft ? 'local' : 'empty');
+  const [photoKey, setPhotoKey] = useState(() => initial.draft?.photoKey ?? (initialPicture ? JSON.stringify([draftOwner.instructorId, dogId, crypto.randomUUID()]) : undefined));
+  const [photoState, setPhotoState] = useState<'ready' | 'loading' | 'failed'>((initial.draft?.photoKey || initialPicture) ? 'loading' : 'ready');
+  const previousPhotoKey = useRef(initial.draft?.photoKey);
   const createdLocationId = useRef<string | null>(null);
   const dog = useDog(dogId);
   const locations = useLocations();
@@ -110,15 +113,23 @@ function NewReportForm() {
   }, [pictureFile]);
 
   useEffect(() => {
-    if (pictureRead.file === pictureFile) return;
-    let cancelled = false;
-    if (!pictureFile) { setPictureRead({ file: null, value: null, failed: false }); return; }
-    setDraftStatus('writing');
-    void readBackupPicture(pictureFile).then(value => {
-      if (!cancelled) setPictureRead({ file: pictureFile, value, failed: false });
-    }, () => { if (!cancelled) setPictureRead({ file: pictureFile, value: null, failed: true }); });
-    return () => { cancelled = true; };
-  }, [pictureFile, pictureRead.file]);
+    if (!photoKey) return;
+    let active = true;
+    if (pictureFile) {
+      void storeDraftPhoto(photoKey, pictureFile).then(
+        () => { if (active) setPhotoState('ready'); },
+        () => { if (active) setPhotoState('failed'); },
+      );
+    } else {
+      void loadDraftPhoto(photoKey).then(file => {
+        if (!active) return;
+        currentPicture.current = file;
+        setPictureFile(file);
+        setPhotoState('ready');
+      }, () => { if (active) setPhotoState('failed'); });
+    }
+    return () => { active = false; };
+  }, [pictureFile, photoKey]);
 
   useLayoutEffect(() => {
     if (draftCommitted.current) return;
@@ -133,19 +144,19 @@ function NewReportForm() {
         phase: dog.currentPhase, notes, sessionDate, redFlag, visibility: redFlag ? 'private' : 'shared',
         locationId: locationId || createdLocationId.current, picture: uploadedPictureUrl, skillIds, milestoneIds,
         distractions: Object.entries(distractionSeverities).filter((entry): entry is [string, DistractionSeverity] => entry[1] !== '').map(([distractionId, severity]) => ({ distractionId, severity })),
-      }, pictureFile: pictureRead.file === pictureFile ? pictureRead.value : null,
+      }, photoKey, pictureFile: initial.draft?.pictureFile && pictureFile === initialPicture && photoState !== 'ready' ? initial.draft.pictureFile : null,
     } satisfies import('../lib/newLogDraft').NewLogDraft;
     if (isDraftStale(draftOwner.instructorId, dogId)) {
       retainPreparingDraft(draftOwner.instructorId, dogId, draft, pictureFile);
       setStaleDraft(true); setDraftStatus('failed'); return;
     }
-    if (pictureRead.file !== pictureFile || pictureRead.failed) {
-      retainPreparingDraft(draftOwner.instructorId, dogId, draft, pictureFile);
-      setDraftStatus(pictureRead.failed ? 'failed' : 'writing'); return;
-    }
     const stored = saveNewLogDraft(draftOwner.instructorId, dogId, draft);
+    if (stored && previousPhotoKey.current !== photoKey) {
+      if (previousPhotoKey.current) void forgetDraftPhoto(previousPhotoKey.current);
+      previousPhotoKey.current = photoKey;
+    }
     setDraftStatus(stored ? 'local' : 'failed');
-  }, [notes, pictureFile, pictureRead, uploadedPictureUrl, skillIds, milestoneIds, redFlag, locationId, newLocationName, distractionSeverities, sessionDate, dog, dogId, draftOwner, initial, createdDate]);
+  }, [notes, pictureFile, photoKey, photoState, initialPicture, uploadedPictureUrl, skillIds, milestoneIds, redFlag, locationId, newLocationName, distractionSeverities, sessionDate, dog, dogId, draftOwner, initial, createdDate]);
 
   useEffect(() => {
     if (!serverConfirmed || !recoveryReport || !dogId || !active.current || submittedVersion.current !== editVersion.current) return;
@@ -184,6 +195,8 @@ function NewReportForm() {
     if (!file) return;
     currentPicture.current = file;
     setPictureError(null);
+    setPhotoKey(JSON.stringify([draftOwner.instructorId, dogId, crypto.randomUUID()]));
+    setPhotoState('loading');
     setPictureFile(file);
     setUploadedPictureUrl(null);
   }
@@ -195,6 +208,10 @@ function NewReportForm() {
       return;
     }
     if (inFlight.current) return;
+    if (photoKey && !pictureFile && !uploadedPictureUrl) {
+      setSubmitError('Reattach the draft photo or remove it before saving.');
+      return;
+    }
     if (staleDraft || (draftOwner.instructorId && isDraftStale(draftOwner.instructorId, dogId!))) { setStaleDraft(true); return; }
     setSubmitError(null);
     setPictureError(null);
@@ -261,7 +278,7 @@ function NewReportForm() {
     } catch (err) {
       if (!active.current) return;
       setPictureError(
-        err instanceof ApiError ? err.message : "Couldn't upload that photo. Try again.",
+        err instanceof Error ? err.message : "Couldn't upload that photo. Try again.",
       );
     } finally {
       inFlight.current = false;
@@ -465,9 +482,11 @@ function NewReportForm() {
             Picture
           </label>
           <input type="file" accept="image/*" onChange={handlePictureChange} />
-          {(pictureFile || uploadedPictureUrl) && <button type="button" className="block mt-2 rounded-md border px-3 py-2 text-sm" onClick={() => {
+          {(pictureFile || uploadedPictureUrl || photoKey) && <button type="button" className="block mt-2 rounded-md border px-3 py-2 text-sm" onClick={() => {
             editVersion.current += 1;
             currentPicture.current = null;
+            setPhotoKey(undefined);
+            setPhotoState('ready');
             setPictureFile(null);
             setUploadedPictureUrl(null);
             setPictureError(null);
@@ -476,6 +495,7 @@ function NewReportForm() {
             <img
               src={picturePreviewUrl}
               alt="Preview"
+              onError={() => setPictureError('This photo could not be displayed. Try a JPEG or PNG, or remove it.')}
               className="mt-2 h-24 w-24 rounded-md object-cover"
             />
           )}
@@ -492,16 +512,16 @@ function NewReportForm() {
         </div>}
       </section>}
       {draftStatus !== 'empty' && <p role="status" className={`rounded-md border p-3 text-sm ${draftStatus === 'failed' ? 'border-amber-500' : 'border-gray-300'}`}>
-        {draftStatus === 'local' ? 'Draft kept on this device only — not sent to the server. Reopen New Training Log for this dog to continue. Use Save Log when ready.' :
-          draftStatus === 'writing' ? 'Preparing the picture. Latest entries and the selected picture are held only in this open page until preparation and device storage succeed. Keep this page open.' :
-          'Latest edits are not stored on this device. Keep this page open and download a backup before leaving. An earlier device draft may still exist.'}
-        {initial.draft && (initial.memoryOnly ? ' Recovered entries from this open page; check them and the picture before saving. Closing or reloading loses any edits still not stored.' : ' Restored a device draft; check its entries and picture before saving.')}
+        {draftStatus === 'failed' ? 'Draft unavailable on this device. Keep this page open until you save.' :
+          photoState === 'failed' ? (pictureFile ? 'Photo is only in this tab. Save before leaving.' : 'Draft restored. Reattach the photo or remove it.') :
+          photoState === 'loading' ? 'Preparing draft photo…' : 'Draft on this device.'}
         {initial.blocked && ' An existing draft could not be read; it has not been overwritten.'}
       </p>}
         {serverConfirmed && submittedVersion.current !== editVersion.current && <p role="status" className="text-sm text-emerald-700">Your earlier submitted version was saved to the server. Save Log again to submit your latest edits.</p>}
         {submitError && !serverConfirmed && <p className="text-sm text-red-500">{submitError}</p>}
         {saving && <p role="status" className="text-sm">Preparing this log. If you change its entries, review them and Save Log again when this attempt finishes.</p>}
-        {(recoveryReport || pictureError || draftStatus === 'failed' || draftStatus === 'writing') && <section aria-label="Log backup" className="space-y-2 rounded-md border border-amber-500 p-3 text-sm">
+        {(recoveryReport || pictureError || draftStatus === 'failed' || photoState === 'failed') && <details aria-label="Log backup" className="space-y-2 rounded-md border border-amber-500 p-3 text-sm">
+          <summary>Backup options</summary>
           <p>Keep this page open. You can download this log’s current entries and selected picture as a backup. This does not save or sync the log in the app.</p>
           <p>The file contains your notes. Keep it private; recovery from it needs review, not automatic import.</p>
           {pictureFile && <div className="space-y-2">
@@ -516,7 +536,7 @@ function NewReportForm() {
             {backupBusy ? 'Preparing backup…' : 'Download this log backup'}
           </button>
           {backupMessage && <p role="status">{backupMessage}</p>}
-        </section>}
+        </details>}
 
         <button
           type="submit"

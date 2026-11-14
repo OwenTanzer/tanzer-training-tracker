@@ -1,7 +1,9 @@
+import { loadDraftPhoto, forgetDraftPhoto } from './draftPhotos.ts';
 import type { TrainingReport } from '../types';
 import { readBackupPicture } from './logBackup.ts';
 
 export interface NewLogDraft {
+  photoKey?: string;
   version: 1;
   savedAt: string;
   report: TrainingReport;
@@ -19,7 +21,9 @@ const volatileBases = new Map<string, string | null | undefined>();
 function durableBytes(key: string) { try { return localStorage.getItem(key); } catch { return undefined; } }
 export function isDraftStale(owner: string, dogId: string) {
   const key = draftKey(owner, dogId);
-  return volatileBases.has(key) && (volatileBases.get(key) === undefined || durableBytes(key) !== volatileBases.get(key));
+  const baseline = volatileBases.get(key);
+  const current = durableBytes(key);
+  return volatileBases.has(key) && current !== undefined && (baseline === undefined ? current !== null : baseline !== current);
 }
 export function discardVolatileDraft(owner: string, dogId: string) {
   const key = draftKey(owner, dogId);
@@ -38,7 +42,8 @@ export async function prepareRecoveryDrafts(owner: string) {
     const loaded = loadNewLogDraft(owner, decodeURIComponent(key.slice(prefix.length)));
     if (loaded.blocked || !loaded.draft) throw new Error('A device draft could not be read.');
     const draft = loaded.draft;
-    if (loaded.selectedFile) draft.pictureFile = await readBackupPicture(loaded.selectedFile);
+    const file = loaded.selectedFile ?? (draft.photoKey ? await loadDraftPhoto(draft.photoKey) : null);
+    if (file) draft.pictureFile = await readBackupPicture(file);
     return { draft, memoryOnly: loaded.memoryOnly ?? false };
   }));
 }
@@ -57,7 +62,7 @@ export function loadNewLogDraft(owner: string | null, dogId: string | undefined)
   const preparing = preparingDrafts.get(draftKey(owner, dogId));
   const memory = preparing?.draft ?? memoryDrafts.get(draftKey(owner, dogId));
   try {
-    const text = memory ? null : localStorage.getItem(draftKey(owner, dogId));
+    const text = memory ? null : durableBytes(draftKey(owner, dogId));
     if (!memory && !text) return { draft: null, blocked: false };
     const d = memory ? structuredClone(memory) : JSON.parse(text!) as NewLogDraft;
     const r = d.report;
@@ -65,6 +70,8 @@ export function loadNewLogDraft(owner: string | null, dogId: string | undefined)
       typeof r.id !== 'string' || !r.id || typeof r.notes !== 'string' || typeof r.sessionDate !== 'string' ||
       typeof r.createdDate !== 'string' || typeof r.updatedDate !== 'string' ||
       (r.picture !== null && typeof r.picture !== 'string') || (r.locationId !== null && typeof r.locationId !== 'string') ||
+      (d.photoKey !== undefined && (typeof d.photoKey !== 'string' ||
+        !d.photoKey.startsWith(JSON.stringify([owner, dogId]).slice(0, -1) + ','))) ||
       typeof r.phase !== 'string' || typeof r.redFlag !== 'boolean' ||
       ![r.skillIds, r.milestoneIds].every(a => Array.isArray(a) && a.every(x => typeof x === 'string')) ||
       !Array.isArray(r.distractions) || !r.distractions.every(x => typeof x.distractionId === 'string' && typeof x.severity === 'string') ||
@@ -91,6 +98,13 @@ export function saveNewLogDraft(owner: string, dogId: string, draft: NewLogDraft
 }
 export function clearNewLogDraft(owner: string, dogId: string): boolean {
   if (isDraftStale(owner, dogId)) return false;
-  try { const key = draftKey(owner, dogId); localStorage.removeItem(key); discardVolatileDraft(owner, dogId); return true; }
+  try {
+    const key = draftKey(owner, dogId);
+    const photoKey = loadNewLogDraft(owner, dogId).draft?.photoKey;
+    localStorage.removeItem(key);
+    discardVolatileDraft(owner, dogId);
+    if (photoKey) void forgetDraftPhoto(photoKey);
+    return true;
+  }
   catch { return false; }
 }

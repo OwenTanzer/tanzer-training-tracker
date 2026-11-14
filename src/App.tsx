@@ -1,6 +1,6 @@
 import { DeferredRecoveryBanner, SyncIndicator, SyncRecovery } from './components/SyncRecovery';
 import { useEffect, useState } from 'react';
-import { Link, Route, Routes } from 'react-router-dom';
+import { Link, Route, Routes, useNavigate } from 'react-router-dom';
 import { LoadingScreen } from './components/LoadingScreen';
 import { randomGuideDogCoat } from './components/GuideDogIllustration';
 import { logout, refreshAccount, useSession } from './lib/auth';
@@ -31,6 +31,7 @@ import { TrainerHistory } from './pages/TrainerHistory';
 const LANDING_SEEN_KEY = 'ttt:landing-seen';
 
 function App() {
+  const navigate = useNavigate();
   const [splashDone, setSplashDone] = useState(false);
   // Rolled once per app load and shared by the loading screen and the login
   // screen, so the dog that walks in during splash is the same dog waiting
@@ -245,7 +246,7 @@ function App() {
             📂 Folders
           </Link>
           <button
-            onClick={() => logout()}
+            onClick={() => { navigate('/', { replace: true }); void logout(); }}
             className="shrink-0 text-sm text-gray-500 hover:underline"
           >
             Log out

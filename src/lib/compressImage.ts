@@ -7,22 +7,22 @@ function loadAndDrawToCanvas(
     const img = new Image();
 
     img.onload = () => {
-      const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
-      const width = Math.round(img.width * scale);
-      const height = Math.round(img.height * scale);
-
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      URL.revokeObjectURL(objectUrl);
-
-      if (!ctx) {
-        reject(new Error('Canvas is not supported in this browser'));
-        return;
+      try {
+        const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+        const width = Math.round(img.width * scale);
+        const height = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas is not supported in this browser');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas);
+      } catch {
+        reject(new Error('Could not prepare that photo. Try a smaller JPEG or PNG.'));
+      } finally {
+        URL.revokeObjectURL(objectUrl);
       }
-      ctx.drawImage(img, 0, 0, width, height);
-      resolve(canvas);
     };
 
     img.onerror = () => {
