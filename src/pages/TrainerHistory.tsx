@@ -141,11 +141,6 @@ export function TrainerHistory() {
         </div>
       </div>
 
-      <p className="text-sm text-gray-500">
-        Your assigned dogs and what needs attention today. Other instructors' data isn't included
-        here.
-      </p>
-
       <section className="space-y-2">
         <h2 className="text-sm font-medium uppercase tracking-wide text-gray-500">
           Needs Attention
