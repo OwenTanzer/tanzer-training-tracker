@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getSyncRecoveryBackup, resolveSyncConflict, retrySync, useSyncConflicts, useSyncStatus } from '../data/store';
+import { deferSyncRecovery, resumeSyncRecovery, useDeferredRecoveryCount, getSyncRecoveryBackup, resolveSyncConflict, retrySync, useSyncConflicts, useSyncStatus } from '../data/store';
 import { downloadSyncRecovery } from '../lib/syncRecoveryBackup';
 import type { Conflict } from '../lib/sync';
 
@@ -25,6 +25,7 @@ export function SyncRecovery() {
   const [choice, setChoice] = useState<{ side: 'local' | 'remote'; conflict: Conflict } | null>(null);
   const [message, setMessage] = useState('');
   const [retrying, setRetrying] = useState(false);
+  const [continuing, setContinuing] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
   const conflict = conflicts[0];
   if (!conflict) return null;
@@ -32,8 +33,17 @@ export function SyncRecovery() {
   const deviceRecovery = conflict.source === 'device';
   return <main className="mx-auto max-w-2xl space-y-4 p-4">
     <h1 className="text-xl font-semibold">Your changes need attention</h1>
+    <section className="space-y-2 rounded border border-sky-300 p-3">
+      <button disabled={continuing || backupBusy} className="rounded bg-sky-600 px-4 py-3 font-medium text-white disabled:opacity-50" onClick={async () => {
+        setContinuing(true);
+        const continued = await deferSyncRecovery();
+        if (!continued) setMessage('Could not set these changes aside yet. Check your connection and available device storage, then try again.');
+        setContinuing(false);
+      }}>{continuing ? 'Opening app…' : 'Continue to app'}</button>
+      <p className="text-sm">Use the latest server data now. Every earlier change that has not reached the server is set aside on this device for later review, not only the one below. New work can save normally. You do not need to download a backup or choose a version first.</p>
+    </section>
     <p>{deviceRecovery ? 'An earlier page and another tab saved different pending changes. Review both versions before choosing. Neither version is a server confirmation.' : 'This record changed in two different ways. Review both versions before choosing.'}</p>
-    {status === 'storage-error' ? <p role="alert" className="rounded border border-amber-500 p-3">This device could not store the latest changes. Keep this page open. Download a recovery backup before leaving; closing or reloading can lose memory-only edits. A choice that cannot be stored will keep both versions open.</p> : <p>These versions still need a choice and are not synced. Unfinished drafts may exist only in this open page. Download and check a recovery backup before leaving.</p>}
+    {status === 'storage-error' ? <p role="alert" className="rounded border border-amber-500 p-3">This device could not store the latest changes. Keep this page open. Download a recovery backup before leaving; closing or reloading can lose memory-only edits. A choice that cannot be stored will keep both versions open.</p> : <p>These earlier changes are not synced. Continue to the app now, or review the versions below. A recovery backup is optional; unfinished drafts may exist only in this open page.</p>}
     <section aria-label="Recovery backup" className="space-y-2 rounded border p-3 text-sm">
       <p>The backup includes this account’s pending edits, both conflicting versions and unfinished log drafts with their selected pictures. Keep it private. It does not save or sync changes in the app.</p>
       <button className="rounded border px-3 py-2" disabled={backupBusy} onClick={async () => { setBackupBusy(true); setMessage('Preparing the recovery file. Keep this page open; no backup is confirmed yet.'); try { downloadSyncRecovery(await getSyncRecoveryBackup()); setMessage('Download requested. Check that the file exists and opens before relying on it. A cancelled or blocked download leaves no backup. Download again after changes.'); } catch { setMessage('Could not prepare the complete backup. Keep this page open and retry. Nothing has been cleared.'); } finally { setBackupBusy(false); } }}>Download recovery backup</button>
@@ -67,5 +77,15 @@ export function SyncIndicator() {
   return <div role="status" className="min-w-0 text-xs">
     <span>{labels[status]}</span>
     {['pending', 'storage-error'].includes(status) && <button className="ml-2 underline" onClick={() => void retrySync()}>Retry sync</button>}
+  </div>;
+}
+// A full-width strip under the header: the header row is already at its width
+// budget on a 320px phone, and a status-line button there wrapped to four lines.
+export function DeferredRecoveryBanner() {
+  const deferred = useDeferredRecoveryCount();
+  if (!deferred) return null;
+  return <div className="border-b border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-900 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-100">
+    <span>Earlier changes are saved on this device, not on the server.</span>
+    <button className="ml-2 font-medium underline" onClick={() => void resumeSyncRecovery()}>Review earlier changes</button>
   </div>;
 }

@@ -1,4 +1,4 @@
-import { SyncIndicator, SyncRecovery } from './components/SyncRecovery';
+import { DeferredRecoveryBanner, SyncIndicator, SyncRecovery } from './components/SyncRecovery';
 import { useEffect, useState } from 'react';
 import { Link, Route, Routes } from 'react-router-dom';
 import { LoadingScreen } from './components/LoadingScreen';
@@ -253,6 +253,7 @@ function App() {
           </button>
         </div>
       </header>
+      <DeferredRecoveryBanner />
       <Routes>
         <Route path="/" element={<TrainerHistory />} />
         {/* /trainer-history kept as an alias of the new home route, in case

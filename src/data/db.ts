@@ -422,7 +422,7 @@ export function loadOutbox(instructorId: string): Envelope | null {
   const raw = localStorage.getItem(`abbys-dog-chej:outbox:${instructorId}`);
   if (!raw) return null;
   const entry = JSON.parse(raw) as Envelope;
-  if (!entry.base || !entry.local || typeof entry.batchId !== 'string' || (entry.recoveries !== undefined && (!Array.isArray(entry.recoveries) || entry.recoveries.some(r => !r || !r.base || !r.local)))) throw new Error('Saved changes could not be read. Keep this browser data and contact support.');
+  if (!entry.base || !entry.local || typeof entry.batchId !== 'string' || [entry.recoveries, entry.deferred].some(branches => branches !== undefined && (!Array.isArray(branches) || branches.some(r => !r || !r.base || !r.local)))) throw new Error('Saved changes could not be read. Keep this browser data and contact support.');
   return entry;
 }
 export function saveOutbox(instructorId: string, entry: Envelope): boolean {

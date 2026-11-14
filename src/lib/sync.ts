@@ -4,7 +4,7 @@
 export type Document = Record<string, unknown>;
 export type Conflict = { collection: string; id?: string; local: unknown; remote: unknown; deletionBlocked?: boolean; folderMovesOnly?: boolean; source?: 'device' };
 export type Snapshot = { blob: Document; updatedAt: string };
-export type Envelope = { base: Document; local: Document; revision: string | null; batchId: string; recoveries?: { base: Document; local: Document }[] };
+export type Envelope = { base: Document; local: Document; revision: string | null; batchId: string; recoveries?: { base: Document; local: Document }[]; deferred?: { base: Document; local: Document }[] };
 export type Status = 'idle' | 'syncing' | 'synced' | 'pending' | 'conflict' | 'storage-error' | 'auth';
 export const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 export function equal(a: unknown, b: unknown): boolean {
@@ -127,6 +127,7 @@ export class SyncEngine {
   conflicts: Conflict[] = [];
   private candidate: { blob: Document; remote: Snapshot; recovery?: boolean } | null = null;
   private recoveries: { base: Document; local: Document }[];
+  private deferred: { base: Document; local: Document }[];
   private running: Promise<void> | null = null;
   private stopped = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -137,9 +138,53 @@ export class SyncEngine {
     this.base = copy(envelope.base); this.local = copy(envelope.local);
     this.revision = envelope.revision; this.batchId = envelope.batchId;
     this.recoveries = copy(envelope.recoveries ?? []);
+    this.deferred = copy(envelope.deferred ?? []);
   }
   envelope(): Envelope { return { base: this.base, local: this.local, revision: this.revision, batchId: this.batchId,
-    ...(this.recoveries.length ? { recoveries: copy(this.recoveries) } : {}) }; }
+    ...(this.recoveries.length ? { recoveries: copy(this.recoveries) } : {}),
+    ...(this.deferred.length ? { deferred: copy(this.deferred) } : {}) }; }
+  deferredCount(): number { return this.deferred.length; }
+  // Keep pending work in a separate durable branch; the active document can
+  // then use confirmed server data and sync new work independently.
+  async deferRecovery(): Promise<boolean> {
+    if (this.running) await this.running;
+    if (this.stopped || !this.conflicts.length) return false;
+    const batch = this.batchId, candidate = this.candidate;
+    try {
+      const remote = await this.io.read();
+      if (this.stopped || this.batchId !== batch || this.candidate !== candidate) return false;
+      const previous = this.envelope();
+      this.deferred.push({ base: copy(this.base), local: copy(this.local) }, ...copy(this.recoveries));
+      this.recoveries = [];
+      this.base = copy(remote.blob); this.local = copy(remote.blob);
+      this.revision = remote.updatedAt; this.batchId = crypto.randomUUID();
+      if (!this.persist()) {
+        this.base = previous.base; this.local = previous.local; this.revision = previous.revision;
+        this.batchId = previous.batchId; this.recoveries = copy(previous.recoveries ?? []);
+        this.deferred = copy(previous.deferred ?? []);
+        this.io.persist(this.envelope()); this.emit(); return false;
+      }
+      this.conflicts = []; this.candidate = null; this.status = 'synced'; this.emit();
+      return true;
+    } catch (err) {
+      if (!this.stopped) this.io.diagnostic('Recovery deferred failed', String((err as { status?: number }).status ?? 'network'));
+      return false;
+    }
+  }
+  // Wait for a sync already in flight so a review that is tapped mid-upload is
+  // carried out rather than discarded.
+  async resumeRecovery(): Promise<boolean> {
+    if (this.running) await this.running;
+    if (this.stopped || this.conflicts.length || !this.deferred.length) return false;
+    const previous = this.envelope();
+    this.recoveries.push(...copy(this.deferred)); this.deferred = [];
+    if (!this.persist()) {
+      this.recoveries = copy(previous.recoveries ?? []); this.deferred = copy(previous.deferred ?? []);
+      this.io.persist(this.envelope()); this.emit(); return false;
+    }
+    if (this.recover()) { this.persist(); this.emit(); void this.flush(); }
+    return true;
+  }
   // Resolve pending work from a previous page before comparing with the server.
   // Both sources remain in the persisted envelope until an explicit final choice.
   recover(): boolean {

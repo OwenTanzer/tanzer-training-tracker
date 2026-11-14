@@ -17,7 +17,7 @@ function pendingChanges(base: Document, local: Document) {
 }
 export function syncRecoveryBackup(owner: string, envelope: Envelope, remote: Document, conflicts: Conflict[], drafts: { draft: NewLogDraft; memoryOnly: boolean }[]) {
   const changes = pendingChanges(envelope.base, envelope.local);
-  const pendingPageVersions = (envelope.recoveries ?? []).map(branch => ({ changes: pendingChanges(branch.base, branch.local) }));
+  const pendingPageVersions = [...(envelope.recoveries ?? []), ...(envelope.deferred ?? [])].map(branch => ({ changes: pendingChanges(branch.base, branch.local) }));
   const alternatives = conflicts.map(c => ({ ...copy(c), local: c.local ?? null, remote: c.remote ?? null, localDeleted: c.local === undefined, remoteDeleted: c.remote === undefined }));
   // Include only supporting records referenced by pending changes, versions or drafts.
   const references: Record<string, Document[]> = {};
@@ -34,7 +34,7 @@ export function syncRecoveryBackup(owner: string, envelope: Envelope, remote: Do
     for (const d of Array.isArray(record.distractions) ? record.distractions : []) ids.push(['distractionTemplates', d.distractionId]);
     for (const [collection, id] of ids) {
       if (typeof id !== 'string' || references[collection]?.some(r => r.id === id)) continue;
-      const found = [envelope.local, remote, envelope.base, ...(envelope.recoveries ?? []).flatMap(branch => [branch.local, branch.base])].flatMap(source => records(source[collection])).find(r => r.id === id);
+      const found = [envelope.local, remote, envelope.base, ...[...(envelope.recoveries ?? []), ...(envelope.deferred ?? [])].flatMap(branch => [branch.local, branch.base])].flatMap(source => records(source[collection])).find(r => r.id === id);
       if (found) { (references[collection] ??= []).push(found); queue.push(found); }
     }
   }
