@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { deferSyncRecovery, resumeSyncRecovery, useDeferredRecoveryCount, resolveSyncConflict, retrySync, useSyncConflicts, useSyncStatus } from '../data/store';
+import { deferSyncRecovery, resumeSyncRecovery, useDeferredRecoveryCount, useActiveDocumentServerConfirmed, resolveSyncConflict, retrySync, useSyncConflicts, useSyncStatus } from '../data/store';
 import type { Conflict } from '../lib/sync';
 
 function versionLabel(value: unknown): string {
@@ -63,12 +63,13 @@ export function SyncRecovery() {
 }
 export function SyncIndicator() {
   const status = useSyncStatus();
+  const serverConfirmed = useActiveDocumentServerConfirmed();
   const labels = {
     idle: '', synced: 'Saved to server', syncing: 'Syncing…', pending: 'Saved on this device · awaiting sync',
     conflict: 'Changes need attention', 'storage-error': 'Not saved on this device · keep this page open', auth: 'Sign in to sync saved changes',
   };
   return <div role="status" className="min-w-0 text-xs">
-    <span>{labels[status]}</span>
+    <span>{status === 'storage-error' && serverConfirmed ? 'Saved to server · device copy unavailable' : labels[status]}</span>
     {['pending', 'storage-error'].includes(status) && <button className="ml-2 underline" onClick={() => void retrySync()}>Retry sync</button>}
   </div>;
 }
