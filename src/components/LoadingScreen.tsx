@@ -1,17 +1,14 @@
 import { useEffect, useState } from 'react';
-import { GuideDogIllustration, type GuideDogCoat } from './GuideDogIllustration';
+import type { GuideDogCoat } from './GuideDogIllustration';
+import './LoadingScreen.css';
 
 const DURATION_MS = 1800;
 
-export function LoadingScreen({
-  coat,
-  onFinish,
-}: {
+export function LoadingScreen({ onFinish }: {
   coat: GuideDogCoat;
   onFinish: () => void;
 }) {
   const [fadingOut, setFadingOut] = useState(false);
-
   useEffect(() => {
     const fadeTimer = setTimeout(() => setFadingOut(true), DURATION_MS - 300);
     const doneTimer = setTimeout(onFinish, DURATION_MS);
@@ -22,20 +19,15 @@ export function LoadingScreen({
   }, [onFinish]);
 
   return (
-    <div
-      className={`fixed inset-0 flex flex-col items-center justify-center gap-6 bg-white dark:bg-gray-900 transition-opacity duration-300 ${
-        fadingOut ? 'opacity-0' : 'opacity-100'
-      }`}
-    >
-      <div className="relative h-24 w-64 overflow-hidden">
-        <div className="absolute bottom-2 left-0 h-0.5 w-full bg-gray-300 dark:bg-gray-700" />
-        <span className="absolute bottom-2 right-3 h-10 w-0.5 bg-gray-300 dark:bg-gray-700" />
-        <GuideDogIllustration
-          coat={coat}
-          className="absolute bottom-2 h-10 w-14 animate-walk-to-curb"
-        />
+    <div className={`painted-loading${fadingOut ? ' is-leaving' : ''}`}>
+      <div className="painted-loading__scene">
+        <img className="painted-loading__art" src={`${import.meta.env.BASE_URL}loading-park.webp`} alt="" />
+        <h1 className="painted-loading__title">Tanzer Training Tracker</h1>
+        <div className="painted-loading__status" role="status">
+          <div className="painted-loading__dots" aria-hidden="true"><span /><span /><span /></div>
+          <p>Opening your training space</p>
+        </div>
       </div>
-      <p className="text-sm text-gray-500 dark:text-gray-400">Tanzer Training Tracker</p>
     </div>
   );
 }
