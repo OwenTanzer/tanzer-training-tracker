@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PhaseGroupedPicker } from '../components/PhaseGroupedPicker';
 import { equal } from '../lib/sync';
-import { ApiError, uploadPhoto } from '../lib/api';
+import { uploadPhoto } from '../lib/api';
 import { compressImageToBlob } from '../lib/compressImage';
 import { isDraftStale, discardVolatileDraft, retainPreparingDraft, loadNewLogDraft, restoreDraftPicture, saveNewLogDraft, clearNewLogDraft } from '../lib/newLogDraft';
 import { downloadLogBackup, logBackup, readBackupPicture } from '../lib/logBackup';
@@ -278,7 +278,7 @@ function NewReportForm() {
     } catch (err) {
       if (!active.current) return;
       setPictureError(
-        err instanceof ApiError ? err.message : "Couldn't upload that photo. Try again.",
+        err instanceof Error ? err.message : "Couldn't upload that photo. Try again.",
       );
     } finally {
       inFlight.current = false;
@@ -495,6 +495,7 @@ function NewReportForm() {
             <img
               src={picturePreviewUrl}
               alt="Preview"
+              onError={() => setPictureError('This photo could not be displayed. Try a JPEG or PNG, or remove it.')}
               className="mt-2 h-24 w-24 rounded-md object-cover"
             />
           )}
