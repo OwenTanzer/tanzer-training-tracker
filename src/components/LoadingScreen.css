@@ -17,13 +17,13 @@
   height: 100%;
   object-fit: cover;
   object-position: center;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, transparent 17%, #000 32%, #000 74%, transparent 88%, transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0%, transparent 17%, #000 32%, #000 74%, transparent 88%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, transparent 16%, #000 31%, #000 75%, transparent 89%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, transparent 16%, #000 31%, #000 75%, transparent 89%, transparent 100%);
   display: block;
 }
 .painted-loading__title {
   position: absolute;
-  top: max(5%, env(safe-area-inset-top));
+  top: max(16px, 4%, calc(env(safe-area-inset-top) + 8px));
   left: 12px;
   right: 12px;
   margin: 0;
@@ -37,7 +37,7 @@
 }
 .painted-loading__status {
   position: absolute;
-  bottom: max(4%, env(safe-area-inset-bottom));
+  bottom: max(14px, 3%, calc(env(safe-area-inset-bottom) + 8px));
   left: 16px;
   right: 16px;
   text-align: center;
