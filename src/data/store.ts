@@ -107,7 +107,7 @@ export function resolveSyncConflict(index: number, side: 'local' | 'remote', exp
   return engine?.resolve(index, side) ?? false;
 }
 export async function deferSyncRecovery() { return await engine?.deferRecovery() ?? false; }
-export function resumeSyncRecovery() { return engine?.resumeRecovery() ?? false; }
+export async function resumeSyncRecovery() { return await engine?.resumeRecovery() ?? false; }
 export function useDeferredRecoveryCount() { return useSyncExternalStore(subscribe, () => engine?.deferredCount() ?? 0); }
 export async function getSyncRecoveryBackup() {
   if (!engine || !currentInstructorId) throw new Error('Sign in to the original account.');

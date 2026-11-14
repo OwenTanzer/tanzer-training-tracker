@@ -171,8 +171,11 @@ export class SyncEngine {
       return false;
     }
   }
-  resumeRecovery(): boolean {
-    if (this.stopped || this.running || this.conflicts.length || !this.deferred.length) return false;
+  // Wait for a sync already in flight so a review that is tapped mid-upload is
+  // carried out rather than discarded.
+  async resumeRecovery(): Promise<boolean> {
+    if (this.running) await this.running;
+    if (this.stopped || this.conflicts.length || !this.deferred.length) return false;
     const previous = this.envelope();
     this.recoveries.push(...copy(this.deferred)); this.deferred = [];
     if (!this.persist()) {
