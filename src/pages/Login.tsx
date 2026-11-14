@@ -34,7 +34,6 @@ export function Login() {
       <div className="instructor-login__sheet">
         <header>
           <h1><img src={`${import.meta.env.BASE_URL}tanzer-wordmark.webp`} alt="Tanzer Training Tracker" /></h1>
-          <img className="instructor-login__park" src={`${import.meta.env.BASE_URL}loading-park.webp`} alt="" />
           <h2>{mode === 'login' ? 'Instructor sign-in' : 'Create your instructor account'}</h2>
         </header>
 
