@@ -137,7 +137,7 @@ function App() {
   }
 
   if (!session) {
-    return <Login coat={coat} />;
+    return <Login />;
   }
 
   if (hydrateError) {

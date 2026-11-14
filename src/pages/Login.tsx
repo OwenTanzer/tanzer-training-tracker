@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { GuideDogIllustration, type GuideDogCoat } from '../components/GuideDogIllustration';
+import './Login.css';
 import { ApiError } from '../lib/api';
 import { createAccount, login } from '../lib/auth';
 import { hasMemorySyncRecovery } from '../data/store';
 import { hasMemoryDraftRecovery } from '../lib/newLogDraft';
 
-export function Login({ coat }: { coat: GuideDogCoat }) {
+export function Login() {
   const [mode, setMode] = useState<'login' | 'create'>('login');
   const [name, setName] = useState('');
   const [passcode, setPasscode] = useState('');
@@ -30,56 +30,52 @@ export function Login({ coat }: { coat: GuideDogCoat }) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-900 p-4">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="text-center space-y-1">
-          <GuideDogIllustration coat={coat} className="mx-auto h-12 w-16" />
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-            Tanzer Training Tracker
-          </h1>
-          <p className="text-sm text-gray-500">
-            {mode === 'login' ? 'Log in as an instructor' : 'Create your instructor account'}
-          </p>
-        </div>
+    <div className="instructor-login">
+      <div className="instructor-login__sheet">
+        <header>
+          <h1><img src={`${import.meta.env.BASE_URL}tanzer-wordmark.webp`} alt="Tanzer Training Tracker" /></h1>
+          <img className="instructor-login__park" src={`${import.meta.env.BASE_URL}loading-park.webp`} alt="" />
+          <h2>{mode === 'login' ? 'Instructor sign-in' : 'Create your instructor account'}</h2>
+        </header>
 
         {(hasMemorySyncRecovery() || hasMemoryDraftRecovery()) && <p role="status" className="rounded-md border border-amber-500 p-3 text-sm">
           Some changes are held only in this open page. Keep it open and log back in to the same instructor account to recover them. Closing or reloading can lose changes that were not stored on this device.
         </p>}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label htmlFor="instructor-name">
               Name
             </label>
             <input
-              autoFocus
+              id="instructor-name"
+              autoComplete="username"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-              className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2"
               placeholder="e.g. Abby"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label htmlFor="instructor-passcode">
               Passcode
             </label>
             <input
+              id="instructor-passcode"
+              autoComplete={mode === 'create' ? 'new-password' : 'current-password'}
               type="password"
               value={passcode}
               onChange={(e) => setPasscode(e.target.value)}
               required
               minLength={4}
-              className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2"
               placeholder={mode === 'create' ? 'At least 4 characters' : 'Your passcode'}
             />
           </div>
 
-          {error && <p className="text-sm text-red-500">{error}</p>}
+          {error && <p role="alert" className="instructor-login__error">{error}</p>}
 
           <button
             type="submit"
             disabled={submitting}
-            className="w-full rounded-md bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600 disabled:opacity-50"
           >
             {submitting ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Create account'}
           </button>
@@ -90,7 +86,6 @@ export function Login({ coat }: { coat: GuideDogCoat }) {
             setMode(mode === 'login' ? 'create' : 'login');
             setError(null);
           }}
-          className="w-full text-center text-sm text-sky-500 hover:underline"
         >
           {mode === 'login' ? 'New instructor? Create an account' : 'Already have an account? Log in'}
         </button>
