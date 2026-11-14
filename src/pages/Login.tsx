@@ -51,7 +51,6 @@ export function Login() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-              placeholder="e.g. Abby"
             />
           </div>
           <div>
