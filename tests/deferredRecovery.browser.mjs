@@ -13,15 +13,16 @@ let browser;
 try {
   await vite.listen(); const origin = 'http://127.0.0.1:' + vite.httpServer.address().port;
   browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_EXECUTABLE || '/usr/bin/google-chrome' });
-  for (const width of [320, 390]) {
+  for (const width of [320, 390]) for (const mode of ['online', 'storage-failure', 'offline']) {
     const context = await browser.newContext({ viewport: { width, height: 844 } });
-    let remote = structuredClone(fixture), puts = 0;
+    let remote = structuredClone(fixture), puts = 0, blocked = false, reads = 0;
     remote.dogs[0].currentPhase = 'Phase 3';
     const local = structuredClone(fixture); local.dogs[0].currentPhase = 'Phase 2';
     await context.route('**/*', async route => {
       const req = route.request(), url = new URL(req.url());
       if (url.origin === origin) return route.continue();
       if (url.hostname !== 'recovery-test.invalid') return route.abort();
+      if (blocked) { reads++; return route.abort(); }
       let body;
       if (url.pathname.includes('account')) body = session;
       else if (req.method() === 'PUT') {
@@ -46,11 +47,28 @@ try {
     await page.getByRole('heading', { name: 'Your changes need attention' }).waitFor();
     const continuation = page.getByRole('button', { name: 'Continue to app', exact: true });
     assert(await continuation.isVisible());
+    if (mode === 'storage-failure') await page.evaluate(() => {
+      window.originalSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function(key, value) {
+        if (key.startsWith('abbys-dog-chej:outbox:')) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        return window.originalSetItem.call(this, key, value);
+      };
+    });
+    if (mode === 'offline') blocked = true;
+    const readsBefore = reads;
     await page.screenshot({ path: `/tmp/dog-access-before-${width}.png`, fullPage: true });
     console.log('CONFLICT SHOWN', width); await continuation.click(); console.log('CLICKED CONTINUE', width);
     await page.getByRole('button', { name: 'Review earlier changes' }).waitFor();
     assert.equal(puts, 0);
-    console.log('APP ENTERED', width); await page.reload();
+    console.log('APP ENTERED', width, mode); assert.equal(reads, readsBefore);
+    blocked = false;
+    if (mode === 'storage-failure') {
+      await page.evaluate(() => { Storage.prototype.setItem = window.originalSetItem; });
+      // Retry persistence after storage is restored before the reopen check.
+      await page.getByRole('button', { name: 'Retry sync', exact: true }).click();
+      await page.getByText('Saved to server', { exact: true }).waitFor();
+    }
+    await page.reload();
     await page.getByRole('button', { name: 'Review earlier changes' }).waitFor();
     assert.equal(await page.getByRole('heading', { name: 'Your changes need attention' }).count(), 0);
     console.log('REOPENED', width); await page.getByRole('link', { name: '+ New Training Log', exact: true }).click();
@@ -69,7 +87,7 @@ try {
     await page.getByText('Saved to server', { exact: true }).waitFor();
     assert.equal(remote.dogs[0].currentPhase, 'Phase 2');
     assert(remote.reports.some(r => r.notes === 'New work while recovery is deferred'));
-    console.log(`PASS ${width}: conflict -> continue -> reload -> new log reaches server -> later resolution retains new log`);
+    console.log(`PASS ${width} ${mode}: conflict -> continue -> reload -> new log reaches server -> later resolution retains new log`);
     await context.close();
   }
 } finally { await browser?.close(); await vite.close(); }
