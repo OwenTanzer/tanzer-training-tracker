@@ -4,7 +4,7 @@
 import { createServer } from 'vite';
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
-const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { chromium, webkit } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const stamp = '2026-07-01T12:00:00.000Z';
 const session = { token: 'synthetic-only', instructorId: 'fixture-trainer', name: 'Synthetic Trainer', profilePhotoUrl: null, trainerSince: '2026-01-01', createdAt: stamp };
 const vite = await createServer({ server: { host: '127.0.0.1', port: 0, hmr: false, ws: false },
@@ -18,9 +18,10 @@ let browser;
 try {
   await vite.listen();
   const origin = 'http://127.0.0.1:' + vite.httpServer.address().port;
-  browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : {}) });
+  const engine = process.env.BROWSER === 'webkit' ? webkit : chromium;
+  browser = await engine.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : {}) });
   for (const blocked of [false, true]) {
-    const context = await browser.newContext();
+    const context = await browser.newContext({viewport: {width: 390, height: 844}});
     let remote = structuredClone(fixture), puts = 0;
     await context.route('**/*', async route => {
       const req = route.request(), url = new URL(req.url());

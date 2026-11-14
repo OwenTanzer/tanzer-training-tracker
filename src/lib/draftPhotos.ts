@@ -16,11 +16,12 @@ function database() {
   return opening;
 }
 async function mutate(key: string, file?: File) {
+  const record = file && { bytes: await file.arrayBuffer(), name: file.name, type: file.type, lastModified: file.lastModified };
   const db = await database();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction('photos', 'readwrite');
     const photos = tx.objectStore('photos');
-    if (file) photos.put(file, key); else photos.delete(key);
+    if (record) photos.put(record, key); else photos.delete(key);
     tx.oncomplete = () => resolve();
     tx.onabort = () => reject(tx.error);
   });
@@ -31,7 +32,14 @@ export async function loadDraftPhoto(key: string): Promise<File> {
   const db = await database();
   return new Promise((resolve, reject) => {
     const read = db.transaction('photos').objectStore('photos').get(key);
-    read.onsuccess = () => read.result instanceof File ? resolve(read.result) : reject(new Error('Missing draft photo'));
+    read.onsuccess = () => {
+      const record = read.result;
+      if (!record || !(record.bytes instanceof ArrayBuffer)) {
+        reject(new Error('Missing draft photo'));
+        return;
+      }
+      resolve(new File([record.bytes], record.name, { type: record.type, lastModified: record.lastModified }));
+    };
     read.onerror = () => reject(read.error);
   });
 }
