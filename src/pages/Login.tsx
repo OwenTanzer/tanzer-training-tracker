@@ -65,7 +65,7 @@ export function Login() {
               onChange={(e) => setPasscode(e.target.value)}
               required
               minLength={4}
-              placeholder={mode === 'create' ? 'At least 4 characters' : 'Your passcode'}
+              placeholder={mode === 'create' ? 'At least 4 characters' : undefined}
             />
           </div>
 
