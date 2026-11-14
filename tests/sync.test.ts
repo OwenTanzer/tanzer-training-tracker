@@ -239,28 +239,30 @@ test('deferred recovery survives reopen while new work syncs, then can be resolv
   } finally { h.stop(); }
 });
 
-test('failed deferred persistence retains original conflict and pending edits', async () => {
+test('failed deferred persistence still opens confirmed data and retains pending edits in memory', async () => {
   const initial = { reports: [{ id: 'r', notes: 'Original' }], dogs: [] };
   const h = harness(initial);
   try {
     const e = h.create(); h.external({ ...initial, reports: [{ id: 'r', notes: 'Server' }] });
     e.stage({ ...initial, reports: [{ id: 'r', notes: 'Phone' }] }); await e.flush();
     const before = h.saved(); h.setQuota(true);
-    assert.equal(await e.deferRecovery(), false); assert.equal(e.conflicts.length, 1);
-    assert.deepEqual(e.local, before.local); assert.equal(e.deferredCount(), 0);
+    assert.equal(await e.deferRecovery(), true); assert.equal(e.conflicts.length, 0);
+    assert.deepEqual(e.local, h.remote()); assert.equal(e.deferredCount(), 1);
+    assert.deepEqual(e.envelope().deferred![0].local, before.local);
     assert.deepEqual(h.saved(), before); assert.equal(h.writes(), 0);
   } finally { h.stop(); }
 });
 
-test('offline continuation does not discard unresolved work', async () => {
+test('offline continuation opens last confirmed data without a fresh read', async () => {
   const initial = { reports: [], dogs: [{ id: 'dog', name: 'Original' }] };
   const h = harness(initial);
   try {
     const e = h.create(); h.external({ ...initial, dogs: [{ id: 'dog', name: 'Server' }] });
     e.stage({ ...initial, dogs: [{ id: 'dog', name: 'Phone' }] }); await e.flush();
-    h.setMode('offline'); assert.equal(await e.deferRecovery(), false);
-    assert.equal(e.conflicts.length, 1); assert.equal(e.deferredCount(), 0);
-    assert.equal((e.local.dogs as any[])[0].name, 'Phone');
+    h.setMode('offline'); assert.equal(await e.deferRecovery(), true);
+    assert.equal(e.conflicts.length, 0); assert.equal(e.deferredCount(), 1);
+    assert.equal((e.local.dogs as any[])[0].name, 'Server');
+    assert.equal((e.envelope().deferred![0].local.dogs as any[])[0].name, 'Phone');
   } finally { h.stop(); }
 });
 
@@ -295,5 +297,21 @@ test('reviewing earlier changes waits for a sync already in flight', async () =>
     release(); h.setGate(null); await syncing;
     assert.equal(await reviewing, true);
     assert.equal(e.conflicts.length, 1); assert.equal(e.deferredCount(), 0);
+  } finally { h.stop(); }
+});
+
+
+test('new records reach server even when continuation cannot persist locally', async () => {
+  const initial = { reports: [], dogs: [{ id: 'dog', name: 'Original' }] };
+  const h = harness(initial);
+  try {
+    const e = h.create(); h.external({ ...initial, dogs: [{ id: 'dog', name: 'Server' }] });
+    e.stage({ ...initial, dogs: [{ id: 'dog', name: 'Phone' }] }); await e.flush();
+    h.setQuota(true); assert.equal(await e.deferRecovery(), true);
+    e.stage({ ...e.local, reports: [{ id: 'new', notes: 'Still usable' }] }); await e.flush();
+    assert.equal((h.remote().reports as any[])[0].id, 'new');
+    assert.equal((h.remote().dogs as any[])[0].name, 'Server');
+    assert.equal(e.deferredCount(), 1);
+    assert.equal((e.envelope().deferred![0].local.dogs as any[])[0].name, 'Phone');
   } finally { h.stop(); }
 });

@@ -127,6 +127,7 @@ export class SyncEngine {
   conflicts: Conflict[] = [];
   private candidate: { blob: Document; remote: Snapshot; recovery?: boolean } | null = null;
   private recoveries: { base: Document; local: Document }[];
+  private lastConfirmed: Snapshot;
   private deferred: { base: Document; local: Document }[];
   private running: Promise<void> | null = null;
   private stopped = false;
@@ -135,6 +136,7 @@ export class SyncEngine {
   io: SyncIO;
   constructor(io: SyncIO, envelope: Envelope) {
     this.io = io;
+    this.lastConfirmed = { blob: copy(envelope.base), updatedAt: envelope.revision ?? '' };
     this.base = copy(envelope.base); this.local = copy(envelope.local);
     this.revision = envelope.revision; this.batchId = envelope.batchId;
     this.recoveries = copy(envelope.recoveries ?? []);
@@ -144,32 +146,19 @@ export class SyncEngine {
     ...(this.recoveries.length ? { recoveries: copy(this.recoveries) } : {}),
     ...(this.deferred.length ? { deferred: copy(this.deferred) } : {}) }; }
   deferredCount(): number { return this.deferred.length; }
-  // Keep pending work in a separate durable branch; the active document can
-  // then use confirmed server data and sync new work independently.
+  // Access does not depend on a network request or successful local storage.
+  // Retain recovery best-effort, including in memory when the device is full.
   async deferRecovery(): Promise<boolean> {
-    if (this.running) await this.running;
-    if (this.stopped || !this.conflicts.length) return false;
-    const batch = this.batchId, candidate = this.candidate;
-    try {
-      const remote = await this.io.read();
-      if (this.stopped || this.batchId !== batch || this.candidate !== candidate) return false;
-      const previous = this.envelope();
-      this.deferred.push({ base: copy(this.base), local: copy(this.local) }, ...copy(this.recoveries));
-      this.recoveries = [];
-      this.base = copy(remote.blob); this.local = copy(remote.blob);
-      this.revision = remote.updatedAt; this.batchId = crypto.randomUUID();
-      if (!this.persist()) {
-        this.base = previous.base; this.local = previous.local; this.revision = previous.revision;
-        this.batchId = previous.batchId; this.recoveries = copy(previous.recoveries ?? []);
-        this.deferred = copy(previous.deferred ?? []);
-        this.io.persist(this.envelope()); this.emit(); return false;
-      }
-      this.conflicts = []; this.candidate = null; this.status = 'synced'; this.emit();
-      return true;
-    } catch (err) {
-      if (!this.stopped) this.io.diagnostic('Recovery deferred failed', String((err as { status?: number }).status ?? 'network'));
-      return false;
-    }
+    if (this.stopped) return false;
+    if (!this.conflicts.length) return true;
+    this.deferred.push({ base: copy(this.base), local: copy(this.local) }, ...copy(this.recoveries));
+    this.recoveries = [];
+    this.base = copy(this.lastConfirmed.blob); this.local = copy(this.lastConfirmed.blob);
+    this.revision = this.lastConfirmed.updatedAt; this.batchId = crypto.randomUUID();
+    this.conflicts = []; this.candidate = null; this.status = 'synced';
+    this.persist(); // Failure is a status warning, never a navigation gate.
+    this.emit();
+    return true;
   }
   // Wait for a sync already in flight so a review that is tapped mid-upload is
   // carried out rather than discarded.
@@ -219,6 +208,7 @@ export class SyncEngine {
     return saved;
   }
   reconcile(remote: Snapshot): boolean {
+    this.lastConfirmed = copy(remote);
     if (!this.recover()) return false;
     const result = merge(this.base, this.local, remote.blob);
     if (result.conflicts.length) {
@@ -289,6 +279,7 @@ export class SyncEngine {
         // Only this immutable snapshot was acknowledged. Newer local edits
         // remain pending and are persisted with the newly confirmed base.
         this.base = sent; this.revision = response.updatedAt;
+        this.lastConfirmed = { blob: copy(sent), updatedAt: response.updatedAt };
         this.status = equal(this.base, this.local) ? 'synced' : 'pending';
         this.persist(); this.emit(); this.failures = 0;
         this.io.diagnostic('Sync confirmed', `batch ${batch}; revision ${response.updatedAt}`);

@@ -34,13 +34,13 @@ export function SyncRecovery() {
   return <main className="mx-auto max-w-2xl space-y-4 p-4">
     <h1 className="text-xl font-semibold">Your changes need attention</h1>
     <section className="space-y-2 rounded border border-sky-300 p-3">
-      <button disabled={continuing || backupBusy} className="rounded bg-sky-600 px-4 py-3 font-medium text-white disabled:opacity-50" onClick={async () => {
+      <button disabled={continuing} className="rounded bg-sky-600 px-4 py-3 font-medium text-white disabled:opacity-50" onClick={async () => {
         setContinuing(true);
         const continued = await deferSyncRecovery();
-        if (!continued) setMessage('Could not set these changes aside yet. Check your connection and available device storage, then try again.');
+        if (!continued) setMessage('Your account changed. Open the app again.');
         setContinuing(false);
       }}>{continuing ? 'Opening app…' : 'Continue to app'}</button>
-      <p className="text-sm">Use the latest server data now. Every earlier change that has not reached the server is set aside on this device for later review, not only the one below. New work can save normally. You do not need to download a backup or choose a version first.</p>
+      <p className="text-sm">Open the app using the last server data already loaded. Every earlier unsynced change is set aside for later review. If device storage is unavailable, those changes may only remain in this open page. No backup, network check or recovery choice is required to continue.</p>
     </section>
     <p>{deviceRecovery ? 'An earlier page and another tab saved different pending changes. Review both versions before choosing. Neither version is a server confirmation.' : 'This record changed in two different ways. Review both versions before choosing.'}</p>
     {status === 'storage-error' ? <p role="alert" className="rounded border border-amber-500 p-3">This device could not store the latest changes. Keep this page open. Download a recovery backup before leaving; closing or reloading can lose memory-only edits. A choice that cannot be stored will keep both versions open.</p> : <p>These earlier changes are not synced. Continue to the app now, or review the versions below. A recovery backup is optional; unfinished drafts may exist only in this open page.</p>}
