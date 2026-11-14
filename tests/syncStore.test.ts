@@ -288,3 +288,28 @@ test('overlapping startup hydrations cannot strand an obsolete tab lock', async 
     else Reflect.deleteProperty(globalThis.navigator, 'locks');
   }
 });
+
+test('exact submitted record is confirmed despite device persistence failure', async () => {
+  const dog = await setup(); failStorage = true; offlineWrite = true;
+  const { report } = store.createReport(input(dog.id, 'Test log'), 'confirmed-log');
+  const submitted = structuredClone(report);
+  assert.equal(store.isReportServerConfirmed(submitted), false);
+  await store.retrySync(); assert.equal(store.isReportServerConfirmed(submitted), false);
+  offlineWrite = false; await store.retrySync();
+  assert.equal(store.getSyncState().status, 'storage-error');
+  assert.equal(store.isReportServerConfirmed(submitted), true);
+  assert.equal(store.isReportServerConfirmed({ ...submitted, notes: 'Unsent later edit' }), false);
+});
+
+test('retry snapshot describes latest submitted fields, not the previous report object', async () => {
+  const dog = await setup(); failStorage = true;
+  store.createReport(input(dog.id, 'Earlier notes'), 'same-log'); await store.retrySync();
+  offlineWrite = true;
+  const latest = store.createReport(input(dog.id, 'Latest notes'), 'same-log');
+  assert.equal(latest.report.notes, 'Latest notes');
+  assert.equal(store.isReportServerConfirmed(latest.report), false);
+  await store.retrySync(); assert.equal(store.isReportServerConfirmed(latest.report), false);
+  offlineWrite = false; await store.retrySync();
+  assert.equal(store.isReportServerConfirmed(latest.report), true);
+  assert.equal(remote.reports.filter(r => r.id === 'same-log').length, 1);
+});

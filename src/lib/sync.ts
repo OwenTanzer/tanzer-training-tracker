@@ -146,6 +146,12 @@ export class SyncEngine {
     ...(this.recoveries.length ? { recoveries: copy(this.recoveries) } : {}),
     ...(this.deferred.length ? { deferred: copy(this.deferred) } : {}) }; }
   deferredCount(): number { return this.deferred.length; }
+  confirmedRecord(collection: string, id: string, expected: unknown): boolean {
+    const records = this.lastConfirmed.blob[collection];
+    return Array.isArray(records) && records.some(record => record.id === id && equal(record, expected));
+  }
+  activeDocumentConfirmed(): boolean { return equal(this.local, this.lastConfirmed.blob); }
+
   // Access does not depend on a network request or successful local storage.
   // Retain recovery best-effort, including in memory when the device is full.
   async deferRecovery(): Promise<boolean> {

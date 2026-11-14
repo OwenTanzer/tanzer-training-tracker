@@ -2,6 +2,7 @@ import { isFutureSessionDate, localSessionDate } from '../../shared/sessionDate'
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PhaseGroupedPicker } from '../components/PhaseGroupedPicker';
+import { equal } from '../lib/sync';
 import { ApiError, uploadPhoto } from '../lib/api';
 import { compressImageToBlob } from '../lib/compressImage';
 import { isDraftStale, discardVolatileDraft, retainPreparingDraft, loadNewLogDraft, restoreDraftPicture, saveNewLogDraft, clearNewLogDraft } from '../lib/newLogDraft';
@@ -10,6 +11,8 @@ import {
   createLocation,
   getStoreIdentity,
   getSyncState,
+  useReportServerConfirmed,
+  isReportServerConfirmed,
   createReport,
   useChecklistItems,
   useDistractionTemplates,
@@ -29,7 +32,21 @@ function NewReportForm() {
   const { dogId } = useParams<{ dogId: string }>();
   const navigate = useNavigate();
   const [draftOwner] = useState(() => getStoreIdentity());
-  const [initial] = useState(() => loadNewLogDraft(draftOwner.instructorId, dogId));
+  const [initial] = useState(() => {
+    const loaded = loadNewLogDraft(draftOwner.instructorId, dogId);
+    const draft = loaded.draft;
+    const recorded = draft && getSyncState().blob.reports.find(r => r.id === draft.report.id);
+    // A failed removeItem must not restore an already-confirmed submission
+    // as the next new log. Keep any newer edits or unuploaded picture intact.
+    const fields = (r: TrainingReport) => ({ ...r, createdDate: '', updatedDate: '' });
+    if (!loaded.blocked && draft && recorded && !draft.newLocationName &&
+        ((!draft.pictureFile && !loaded.selectedFile) || !!draft.report.picture) &&
+        isReportServerConfirmed(recorded) && equal(fields(draft.report), fields(recorded))) {
+      if (draftOwner.instructorId && dogId) clearNewLogDraft(draftOwner.instructorId, dogId);
+      return { draft: null, blocked: false } as typeof loaded;
+    }
+    return loaded;
+  });
   const [initialPicture] = useState(() => { try { return initial.selectedFile ?? restoreDraftPicture(initial.draft?.pictureFile ?? null); } catch { return null; } });
   const [staleDraft, setStaleDraft] = useState(initial.stale ?? false);
   const [confirmNewer, setConfirmNewer] = useState(false);
@@ -65,6 +82,8 @@ function NewReportForm() {
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [recoveryReport, setRecoveryReport] = useState<TrainingReport | null>(null);
+  const serverConfirmed = useReportServerConfirmed(recoveryReport);
+  const submittedVersion = useRef<number | null>(null);
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupMessage, setBackupMessage] = useState('');
   const [skillIds, setSkillIds] = useState<string[]>(initial.draft?.report.skillIds ?? []);
@@ -127,6 +146,17 @@ function NewReportForm() {
     const stored = saveNewLogDraft(draftOwner.instructorId, dogId, draft);
     setDraftStatus(stored ? 'local' : 'failed');
   }, [notes, pictureFile, pictureRead, uploadedPictureUrl, skillIds, milestoneIds, redFlag, locationId, newLocationName, distractionSeverities, sessionDate, dog, dogId, draftOwner, initial, createdDate]);
+
+  useEffect(() => {
+    if (!serverConfirmed || !recoveryReport || !dogId || !active.current || submittedVersion.current !== editVersion.current) return;
+    const owner = getStoreIdentity();
+    if (owner.generation !== draftOwner.generation || owner.instructorId !== draftOwner.instructorId) return;
+    draftCommitted.current = true;
+    // The exact submitted record is confirmed by the server. Failed cleanup
+    // of a device-only draft must not turn that success back into a failed save.
+    if (draftOwner.instructorId) clearNewLogDraft(draftOwner.instructorId, dogId);
+    navigate(`/dog/${dogId}`);
+  }, [serverConfirmed, recoveryReport, dogId, draftOwner, navigate]);
 
   if (!dog || !dogId) {
     return <p className="p-4 text-gray-500">Dog not found.</p>;
@@ -213,10 +243,11 @@ function NewReportForm() {
         distractions,
         sessionDate,
       }, reportId.current);
+      submittedVersion.current = editVersion.current;
+      setRecoveryReport({ ...report });
       if (!persisted) {
-        setRecoveryReport({ ...report });
         setSubmitError(
-          "This device could not store the log. Keep this form open; retrying Save updates this same log rather than creating another.",
+          "The device copy could not be stored. Waiting for server confirmation; keep this form open. Retry Save uses the same log.",
         );
         return;
       }
@@ -467,7 +498,8 @@ function NewReportForm() {
         {initial.draft && (initial.memoryOnly ? ' Recovered entries from this open page; check them and the picture before saving. Closing or reloading loses any edits still not stored.' : ' Restored a device draft; check its entries and picture before saving.')}
         {initial.blocked && ' An existing draft could not be read; it has not been overwritten.'}
       </p>}
-        {submitError && <p className="text-sm text-red-500">{submitError}</p>}
+        {serverConfirmed && submittedVersion.current !== editVersion.current && <p role="status" className="text-sm text-emerald-700">Your earlier submitted version was saved to the server. Save Log again to submit your latest edits.</p>}
+        {submitError && !serverConfirmed && <p className="text-sm text-red-500">{submitError}</p>}
         {saving && <p role="status" className="text-sm">Preparing this log. If you change its entries, review them and Save Log again when this attempt finishes.</p>}
         {(recoveryReport || pictureError || draftStatus === 'failed' || draftStatus === 'writing') && <section aria-label="Log backup" className="space-y-2 rounded-md border border-amber-500 p-3 text-sm">
           <p>Keep this page open. You can download this log’s current entries and selected picture as a backup. This does not save or sync the log in the app.</p>

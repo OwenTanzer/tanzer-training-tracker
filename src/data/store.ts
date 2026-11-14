@@ -108,6 +108,15 @@ export function resolveSyncConflict(index: number, side: 'local' | 'remote', exp
 }
 export async function deferSyncRecovery() { return await engine?.deferRecovery() ?? false; }
 export async function resumeSyncRecovery() { return await engine?.resumeRecovery() ?? false; }
+export function isReportServerConfirmed(report: TrainingReport): boolean {
+  return engine?.confirmedRecord('reports', report.id, report) ?? false;
+}
+export function useReportServerConfirmed(report: TrainingReport | null): boolean {
+  return useSyncExternalStore(subscribe, () => report !== null && isReportServerConfirmed(report));
+}
+export function useActiveDocumentServerConfirmed(): boolean {
+  return useSyncExternalStore(subscribe, () => engine?.activeDocumentConfirmed() ?? false);
+}
 export function useDeferredRecoveryCount() { return useSyncExternalStore(subscribe, () => engine?.deferredCount() ?? 0); }
 export async function getSyncRecoveryBackup() {
   if (!engine || !currentInstructorId) throw new Error('Sign in to the original account.');
@@ -1061,7 +1070,8 @@ export function createReport(
   const existing = db.reports.find((r) => r.id === reportId);
   if (existing) {
     if (existing.dogId !== input.dogId) throw new Error('This saved log belongs to another dog. Reopen the correct log.');
-    return { report: existing, persisted: updateReport(existing.id, input) };
+    const persisted = updateReport(existing.id, input);
+    return { report: db.reports.find(r => r.id === reportId)!, persisted };
   }
   const report: TrainingReport = {
     id: reportId,
