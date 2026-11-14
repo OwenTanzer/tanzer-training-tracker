@@ -68,9 +68,17 @@ export function SyncIndicator() {
     idle: '', synced: 'Saved to server', syncing: 'Syncing…', pending: 'Saved on this device · awaiting sync',
     conflict: 'Changes need attention', 'storage-error': 'Not saved on this device · keep this page open', auth: 'Sign in to sync saved changes',
   };
-  return <div role="status" className="min-w-0 text-xs">
-    <span>{status === 'storage-error' && serverConfirmed ? 'Saved to server · device copy unavailable' : labels[status]}</span>
-    {['pending', 'storage-error'].includes(status) && <button className="ml-2 underline" onClick={() => void retrySync()}>Retry sync</button>}
+  const label = status === 'storage-error' && serverConfirmed ? 'Saved to server · device copy unavailable' : labels[status];
+  const retryable = ['pending', 'storage-error'].includes(status);
+  // Reserve the longest status at the actual font size and viewport width.
+  // Changing a sync label or showing Retry must never move the training list.
+  const possibleLabels = [...Object.values(labels), 'Saved to server · device copy unavailable'];
+  return <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-2 text-xs dark:border-gray-700">
+    <div className="grid min-w-0 flex-1">
+      {possibleLabels.map(text => <span key={text} aria-hidden="true" className="invisible col-start-1 row-start-1">{text || '\u00a0'}</span>)}
+      <span role="status" className="col-start-1 row-start-1">{label}</span>
+    </div>
+    <button disabled={!retryable} tabIndex={retryable ? 0 : -1} aria-hidden={!retryable} className={`shrink-0 underline ${retryable ? '' : 'invisible'}`} onClick={() => void retrySync()}>Retry sync</button>
   </div>;
 }
 // A full-width strip under the header: the header row is already at its width

@@ -223,7 +223,6 @@ function App() {
           ⚙️
         </Link>
         <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-          <SyncIndicator />
           <Link
             to="/"
             title="Home"
@@ -253,6 +252,7 @@ function App() {
           </button>
         </div>
       </header>
+      <SyncIndicator />
       <DeferredRecoveryBanner />
       <Routes>
         <Route path="/" element={<TrainerHistory />} />
