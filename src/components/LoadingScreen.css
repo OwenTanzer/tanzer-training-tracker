@@ -69,23 +69,30 @@
   0%, 70%, 100% { opacity: .3; transform: translateY(0); }
   35% { opacity: 1; transform: translateY(-4px); }
 }
-@media (max-height: 650px) {
-  .painted-loading__title {
-    top: 0;
-    left: 0;
-    right: 0;
-    padding: 28px 12px 38px;
-    background: linear-gradient(#f9e6c7, #f9e6c700);
-  }
-  .painted-loading__status {
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding: 30px 16px max(18px, env(safe-area-inset-bottom));
-    background: linear-gradient(#f9e6c700, #f9e6c7 45%);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .painted-loading { transition: none; }
   .painted-loading__dots span { animation: none; opacity: .65; }
+}
+
+/* Text occupies its own paper bands outside the illustration. */
+.painted-loading__scene {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.painted-loading__title {
+  position: static;
+  grid-row: 1;
+  padding: max(22px, env(safe-area-inset-top)) 16px 18px;
+  background: #f9e6c7;
+}
+.painted-loading__art {
+  grid-row: 2;
+  min-height: 0;
+  object-position: center 62%;
+}
+.painted-loading__status {
+  position: static;
+  grid-row: 3;
+  padding: 18px 16px max(20px, env(safe-area-inset-bottom));
+  background: #f9e6c7;
 }
