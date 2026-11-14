@@ -1,0 +1,26 @@
+.instructor-login {
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+  display: grid;
+  place-items: center;
+  color-scheme: light;
+  color: #452914;
+  background: #f9e6c7;
+}
+.instructor-login__sheet { width: min(100%, 360px); }
+.instructor-login header { text-align: center; }
+.instructor-login h1 img { width: clamp(140px, 24vh, 208px); margin: auto; }
+.instructor-login h2 { font: 600 24px/1.2 Georgia, serif; margin: 20px 0 18px; }
+.instructor-login label { display: block; font-weight: 600; margin-bottom: 4px; }
+.instructor-login input {
+  width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid #a58d70;
+  border-radius: 8px; background: #fff8ed; color: #392719; font-size: 16px;
+}
+.instructor-login button { min-height: 44px; width: 100%; cursor: pointer; }
+.instructor-login button[type=submit] { background: #49301f; color: #fff8ed; border-radius: 8px; font-weight: 650; }
+.instructor-login button:disabled { opacity: .65; }
+.instructor-login button:not([type=submit]) { margin-top: 6px; color: #63432b; text-decoration: underline; text-underline-offset: 3px; }
+.instructor-login :focus-visible { outline: 3px solid #396659; outline-offset: 2px; }
+.instructor-login__error { color: #8a241c; }
+.instructor-login [role=status] { margin: 12px 0; }
